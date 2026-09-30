@@ -119,7 +119,7 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
           t = upsert<Task>("tasks", {
             id: t.id,
             evaluation,
-            status: evaluation.verdict === "valide" ? "done" : "todo",
+            status: evaluation.verdict === "valide" ? "done" : "retry",
             notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
           });
           await appendDecision(
@@ -131,7 +131,8 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
         }
       } catch (e) {
         const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);
-        t = upsert<Task>("tasks", { id: t.id, status: "todo", notes: note(t, "Millikin", `⚠️ ${message}`) });
+        // A failure goes to "À relancer"; a manual stop simply returns to the backlog.
+        t = upsert<Task>("tasks", { id: t.id, status: signal.aborted ? "todo" : "retry", notes: note(t, "Millikin", `⚠️ ${message}`) });
         emit({ type: "error", message });
       }
       upsert("tasks", { id: t.id, trace: run.trace });

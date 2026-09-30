@@ -97,7 +97,7 @@ function resolveCards(refs: unknown, projectId: string): string[] {
     ),
   ];
 }
-const STATUSES = ["todo", "doing", "review", "done"];
+const STATUSES = ["todo", "retry", "doing", "review", "done"];
 
 export const TOOL_GROUPS: Group[] = [
   {
