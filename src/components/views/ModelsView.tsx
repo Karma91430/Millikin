@@ -1,13 +1,24 @@
 "use client";
 
 import { Download, Play, Plus, Power, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, crud, formatBytes, useData, type Provider } from "../api";
 import { Badge, Button, Card, cx, ErrorNote, Field, Input, PageHeader } from "../ui";
 
 type Installed = { name: string; size: number; family?: string; parameter_size?: string; quantization?: string; capabilities: string[] };
 type Loaded = { name: string; size: number; size_vram: number; expires_at: string; context_length?: number };
 type OllamaState = { provider: { id: string; name: string; base_url: string }; version?: string; installed: Installed[]; loaded: Loaded[] };
+
+/** Popular local models (tool-capable chat models first, then embeddings). */
+const SUGGESTED: [string, string][] = [
+  ["qwen3:4b", "léger, outils + réflexion"],
+  ["qwen3:8b", "bon équilibre, outils + réflexion"],
+  ["qwen3:14b", "plus fiable pour les chefs d'équipe (≈ 10 Go de RAM)"],
+  ["llama3.1:8b", "généraliste, outils"],
+  ["qwen2.5-coder:7b", "code, outils"],
+  ["nomic-embed-text", "embedding pour le RAG"],
+  ["bge-m3", "embedding multilingue pour le RAG"],
+];
 
 const CAP_COLOR: Record<string, string> = { tools: "#10b981", thinking: "#8b5cf6", vision: "#06b6d4", embedding: "#f59e0b", completion: "#64748b" };
 
@@ -51,41 +62,79 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
 function Models({ hostId, providers, onHost, onChange }: { hostId: string; providers: Provider[]; onHost: (id: string) => void; onChange: () => void }) {
   const st = useData<OllamaState>(`/api/ollama?providerId=${hostId}`);
   const [pull, setPull] = useState("");
-  const [progress, setProgress] = useState<{ status: string; pct?: number } | null>(null);
+  const [progress, setProgress] = useState<{ model: string; status: string; pct?: number } | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
+  const pullCtrl = useRef<AbortController | null>(null);
   const loaded = new Map((st.data?.loaded ?? []).map((l) => [l.name, l]));
+  const installed = new Set((st.data?.installed ?? []).map((m) => m.name));
   const act = (action: string, model: string) => api("/api/ollama", { method: "POST", json: { action, model, providerId: hostId } });
 
-  async function doPull() {
-    setError(undefined);
-    setProgress({ status: "démarrage…" });
+  // Loaded models and CLI-side changes show up without a manual refresh.
+  useEffect(() => {
+    const t = setInterval(st.reload, 10000);
+    return () => clearInterval(t);
+  }, [st.reload]);
+
+  /** Re-read the installed models from Ollama and sync the catalog used by agent/model pickers. */
+  async function refresh() {
+    setSyncMsg("synchronisation…");
     try {
-      const r = await fetch("/api/ollama", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "pull", model: pull.trim(), providerId: hostId }) });
+      const r = await api<{ added: number; total: number }>("/api/ollama", { method: "POST", json: { action: "sync", providerId: hostId } });
+      setSyncMsg(`✓ ${r.total} modèle(s) sur Ollama${r.added ? `, ${r.added} nouveau(x)` : ""}`);
+      st.reload();
+      onChange();
+    } catch (e) {
+      setSyncMsg(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Equivalent of `ollama pull <model>`, with live progress; Annuler stops the download. */
+  async function doPull(name = pull.trim()) {
+    if (!name || progress) return;
+    setError(undefined);
+    setDone(null);
+    setProgress({ model: name, status: "démarrage…" });
+    const ctrl = new AbortController();
+    pullCtrl.current = ctrl;
+    try {
+      const r = await fetch("/api/ollama", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "pull", model: name, providerId: hostId }),
+        signal: ctrl.signal,
+      });
       if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`);
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      let ok = false;
       for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
+        const { value, done: end } = await reader.read();
+        if (end) break;
         buf += dec.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
         for (const l of lines) {
           if (!l.trim()) continue;
           const j = JSON.parse(l) as { status?: string; total?: number; completed?: number; error?: string };
-          if (j.error) throw new Error(j.error);
-          setProgress({ status: j.status ?? "", pct: j.total ? Math.round(((j.completed ?? 0) / j.total) * 100) : undefined });
+          if (j.error) throw new Error(j.error.includes("file does not exist") ? `« ${name} » n'existe pas dans la bibliothèque Ollama (vérifie le nom et le tag).` : j.error);
+          if (j.status === "success") ok = true;
+          setProgress({ model: name, status: j.status ?? "", pct: j.total ? Math.round(((j.completed ?? 0) / j.total) * 100) : undefined });
         }
       }
+      if (!ok) throw new Error("Téléchargement interrompu avant la fin");
       setPull("");
-      setProgress(null);
-      st.reload();
-      onChange();
+      setDone(name);
+      await refresh();
     } catch (e) {
+      setError(ctrl.signal.aborted ? `Téléchargement de ${name} annulé.` : e instanceof Error ? e.message : String(e));
+    } finally {
       setProgress(null);
-      setError(e instanceof Error ? e.message : String(e));
+      pullCtrl.current = null;
     }
   }
 
@@ -104,31 +153,73 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
         <span className="text-sm text-fg-muted">
           {st.data ? `${st.data.provider.name} · Ollama ${st.data.version ?? "?"} · ${st.data.installed.length} modèles` : st.error ? "" : "Connexion…"}
         </span>
-        <Button size="sm" variant="ghost" onClick={st.reload}>
-          <RefreshCw size={13} />
+        <Button size="sm" variant="soft" onClick={refresh} title="Relire les modèles installés sur Ollama et mettre à jour les listes de modèles de l'appli">
+          <RefreshCw size={13} /> Rafraîchir depuis Ollama
         </Button>
+        {syncMsg && <span className="text-xs text-fg-muted">{syncMsg}</span>}
       </div>
       <ErrorNote>{st.error && `Ollama injoignable : ${st.error}. Lance « ollama serve » ou vérifie l'hôte.`}</ErrorNote>
       <ErrorNote>{error}</ErrorNote>
 
-      <Card className="flex flex-wrap items-end gap-2 p-3">
-        <Field label="Télécharger un modèle" className="min-w-64 flex-1" hint={<>Nom du catalogue Ollama, ex : qwen3:14b, llama3.2:3b, gemma3:12b, bge-m3</>}>
-          <Input value={pull} onChange={(e) => setPull(e.target.value)} placeholder="qwen3:14b" onKeyDown={(e) => e.key === "Enter" && pull.trim() && !progress && doPull()} />
-        </Field>
-        <Button variant="primary" onClick={doPull} disabled={!pull.trim() || !!progress}>
-          <Download size={14} /> Télécharger
-        </Button>
+      <Card className="flex flex-col gap-3 p-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <Field
+            label="Télécharger un modèle (ollama pull)"
+            className="min-w-64 flex-1"
+            hint={
+              <>
+                Nom et tag de la{" "}
+                <a href="https://ollama.com/library" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  bibliothèque Ollama
+                </a>
+                , ex : qwen3:14b, llama3.1:8b, bge-m3. Attention à la place disque et à la mémoire.
+              </>
+            }
+          >
+            <Input value={pull} onChange={(e) => setPull(e.target.value)} placeholder="qwen3:14b" onKeyDown={(e) => e.key === "Enter" && doPull()} disabled={!!progress} />
+          </Field>
+          {progress ? (
+            <Button variant="danger" onClick={() => pullCtrl.current?.abort()}>
+              Annuler
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={() => doPull()} disabled={!pull.trim()}>
+              <Download size={14} /> Télécharger
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-fg-subtle">Suggestions :</span>
+          {SUGGESTED.map(([name, why]) => (
+            <button
+              key={name}
+              disabled={!!progress || installed.has(name)}
+              onClick={() => (setPull(name), doPull(name))}
+              title={installed.has(name) ? "déjà installé" : why}
+              className={cx(
+                "rounded-md border px-2 py-0.5 font-mono text-[11px]",
+                installed.has(name) ? "border-emerald-500/30 text-emerald-400" : "border-line text-fg-muted hover:border-line-strong hover:text-fg",
+              )}
+            >
+              {installed.has(name) ? "✓ " : ""}
+              {name}
+            </button>
+          ))}
+        </div>
         {progress && (
-          <div className="w-full">
+          <div>
             <div className="mb-1 flex justify-between text-xs text-fg-muted">
-              <span>{progress.status}</span>
-              {progress.pct !== undefined && <span>{progress.pct}%</span>}
+              <span>
+                <span className="font-mono">{progress.model}</span> · {progress.status}
+              </span>
+              {progress.pct !== undefined && <span className="tabular-nums">{progress.pct}%</span>}
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
-              <div className="h-full bg-accent transition-all" style={{ width: `${progress.pct ?? 5}%` }} />
+              <div className="h-full bg-accent transition-all" style={{ width: `${progress.pct ?? 3}%` }} />
             </div>
           </div>
         )}
+        {done && <div className="text-xs text-emerald-400">✓ {done} est installé et disponible dans les listes de modèles.</div>}
       </Card>
 
       <Card className="overflow-x-auto">

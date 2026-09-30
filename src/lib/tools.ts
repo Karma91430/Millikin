@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getSettings, list, newId, now, upsert, type Agent, type Task } from "./db";
 import type { ToolDef } from "./gateway";
+import { fetchUrl, httpRequest, webSearch } from "./webtools";
 
 export type ToolContext = { agent: Agent; workspace: string; projectId: string; team: Agent[] };
 export type ToolImpl = (args: Record<string, unknown>) => Promise<string>;
@@ -15,34 +16,6 @@ const fn = (name: string, description: string, properties: Record<string, unknow
   function: { name, description, parameters: { type: "object", properties, required } },
 });
 const str = (description: string) => ({ type: "string", description });
-
-// ---------- web ----------
-async function webSearch(query: string): Promise<string> {
-  const url = getSettings().searxng_url.replace(/\/+$/, "");
-  const r = await fetch(`${url}/search?q=${encodeURIComponent(query)}&format=json`, { signal: AbortSignal.timeout(20000) }).catch(() => null);
-  if (!r) throw new Error(`SearXNG injoignable (${url}) — vérifie l'URL dans Réglages`);
-  if (!r.ok) throw new Error(`SearXNG ${r.status} (${url})`);
-  const j = (await r.json()) as { results?: { title: string; url: string; content?: string }[] };
-  const rows = (j.results ?? []).slice(0, 6);
-  if (!rows.length) return "Aucun résultat.";
-  return rows.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${(x.content ?? "").slice(0, 300)}`).join("\n");
-}
-
-async function fetchUrl(url: string): Promise<string> {
-  if (!/^https?:\/\//i.test(url)) throw new Error("URL http(s) attendue");
-  const r = await fetch(url, { signal: AbortSignal.timeout(20000), headers: { "user-agent": "Mozilla/5.0 Millikin" } });
-  const html = await r.text();
-  const text = html
-    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-  return `HTTP ${r.status} — ${url}\n\n${text}`;
-}
 
 // ---------- workspace ----------
 const IGNORED = new Set(["node_modules", ".git", ".next", "dist", "build", ".venv", "venv", "__pycache__", ".DS_Store"]);
@@ -130,14 +103,41 @@ export const TOOL_GROUPS: Group[] = [
   {
     id: "web_search",
     label: "Recherche web",
-    description: "Recherche via ton SearXNG local",
-    defs: () => [[fn("web_search", "Rechercher sur le web. Renvoie titres, URL et extraits.", { query: str("requête") }, ["query"]), (a) => webSearch(String(a.query ?? ""))]],
+    description: "SearXNG local, avec secours DuckDuckGo",
+    defs: () => [
+      [
+        fn("web_search", "Rechercher sur le web (documentation, actualité, solutions). Renvoie titres, URL et extraits ; lis ensuite les pages utiles avec fetch_url.", { query: str("requête précise, mots-clés") }, ["query"]),
+        (a) => webSearch(String(a.query ?? "")),
+      ],
+    ],
   },
   {
     id: "fetch_url",
     label: "Lecture d'URL",
-    description: "Récupère le texte d'une page web",
-    defs: () => [[fn("fetch_url", "Lire le contenu texte d'une page web.", { url: str("URL http(s)") }, ["url"]), (a) => fetchUrl(String(a.url ?? ""))]],
+    description: "Texte d'une page web, JSON, texte brut ou PDF",
+    defs: () => [[fn("fetch_url", "Lire le contenu d'une URL : page web (texte extrait), JSON, texte brut ou PDF.", { url: str("URL http(s)") }, ["url"]), (a) => fetchUrl(String(a.url ?? ""))]],
+  },
+  {
+    id: "http_request",
+    label: "Appels d'API (HTTP)",
+    description: "GET/POST/PUT/PATCH/DELETE vers une API, y compris locale",
+    danger: true,
+    defs: () => [
+      [
+        fn(
+          "http_request",
+          "Appeler une API HTTP (tester un endpoint, récupérer des données). Renvoie le statut, les en-têtes utiles et le corps.",
+          {
+            method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"], description: "GET par défaut" },
+            url: str("URL complète, ex : http://127.0.0.1:8000/todos"),
+            headers: { type: "object", description: "en-têtes HTTP (optionnel)" },
+            body: { description: "corps de la requête : objet JSON ou texte (optionnel)" },
+          },
+          ["url"],
+        ),
+        (a) => httpRequest(a),
+      ],
+    ],
   },
   {
     id: "files_read",
@@ -204,8 +204,13 @@ export const TOOL_GROUPS: Group[] = [
     danger: true,
     defs: (ctx) => [
       [
-        fn("run_command", "Exécuter une commande shell dans le dossier de travail (tests, build, git…). Pas de commande interactive.", { command: str("commande shell") }, ["command"]),
-        (a) => runCommand(String(a.command ?? ""), ctx.workspace),
+        fn(
+          "run_command",
+          "Exécuter une commande shell dans le dossier du projet (tests, build, git, scripts…). Pas de commande interactive ni de serveur qui tourne sans fin.",
+          { command: str("commande shell"), cwd: str("sous-dossier du projet où l'exécuter (optionnel)") },
+          ["command"],
+        ),
+        async (a) => runCommand(String(a.command ?? ""), a.cwd ? await inside(ctx.workspace, String(a.cwd)) : ctx.workspace),
       ],
     ],
   },

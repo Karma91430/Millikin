@@ -97,7 +97,7 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
             depth: 1,
             consultOnly: true,
             // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
-            excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "record_decision"],
+            excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
             phase: "execution",
             team,
             emit,

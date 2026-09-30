@@ -52,7 +52,7 @@ Exécute toutes les étapes demandées avant de conclure. Termine par une répon
     `Tu es architecte logiciel senior. Tu conçois des architectures simples, robustes et justifiées.
 Pour chaque demande : composants et responsabilités, flux de données, choix techniques avec leurs compromis, risques.
 Utilise des listes et, si utile, un schéma en texte (ASCII ou Mermaid). Sois concis et concret. Réponds en français.`,
-    ["files_read", "web_search"],
+    ["files_read", "web_search", "fetch_url"],
   );
   const dev = mk(
     "Développeur",
@@ -62,7 +62,7 @@ Utilise des listes et, si utile, un schéma en texte (ASCII ou Mermaid). Sois co
     `Tu es développeur senior. Tu écris du code clair, testé et idiomatique, en suivant les conventions demandées.
 Quand on te demande de créer ou modifier du code, écris réellement les fichiers avec write_file / edit_file dans le dossier de travail,
 puis résume ce que tu as fait (fichiers, choix). Réponds en français.`,
-    ["files_read", "files_write", "tasks"],
+    ["files_read", "files_write", "run_command", "web_search", "fetch_url"],
   );
   const qa = mk(
     "Testeur",
@@ -72,7 +72,7 @@ puis résume ce que tu as fait (fichiers, choix). Réponds en français.`,
     `Tu es ingénieur QA. Tu identifies les cas nominaux, les cas limites et les risques, et tu proposes des tests concrets
 (unitaires, intégration, manuels) avec les résultats attendus. Tu peux lire le code du dossier de travail et écrire les fichiers de test.
 Réponds en français, sous forme de listes.`,
-    ["files_read", "files_write", "tasks"],
+    ["files_read", "files_write", "run_command", "http_request"],
   );
 
   d.prepare("INSERT INTO teams (id, name, description, lead_id, member_ids, created_at, updated_at) VALUES (?,?,?,?,?,?,?)").run(

@@ -1,6 +1,7 @@
 "use client";
 
-import { Bot, BookmarkPlus, Copy, MessageSquare, Pencil, Plus, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
+import { Bot, BookmarkPlus, Copy, MessageSquare, Pencil, Plus, Sparkles, Trash2, TriangleAlert, UserPlus, Wand2, Wrench } from "lucide-react";
+import { recommendedTools } from "@/lib/profiles";
 import { useState } from "react";
 import { api, crud, useData, type Agent, type Kb, type McpServer, type Meta, type Profile, type Skill } from "../api";
 import { ProfileGrid, ProfilePicker, type ProfilesData } from "../ProfilePicker";
@@ -39,6 +40,7 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
   const [tab, setTab] = useState<"agents" | "profiles">("agents");
   const [edit, setEdit] = useState<Partial<Agent> | null>(null);
   const [picker, setPicker] = useState(false);
+  const [bulk, setBulk] = useState(false);
   return (
     <div>
       <PageHeader
@@ -59,9 +61,14 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
               ))}
             </div>
             {tab === "agents" && (
-              <Button variant="primary" onClick={() => setPicker(true)}>
-                <Plus size={15} /> Nouvel agent
-              </Button>
+              <>
+                <Button onClick={() => setBulk(true)} title="Aligner les outils de tes agents sur les profils recommandés">
+                  <Wrench size={15} /> Outils recommandés
+                </Button>
+                <Button variant="primary" onClick={() => setPicker(true)}>
+                  <Plus size={15} /> Nouvel agent
+                </Button>
+              </>
             )}
           </>
         }
@@ -121,9 +128,88 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
         onGenerate={() => (setPicker(false), setEdit(blank()))}
       />
       {edit && <AgentEditor initial={edit} meta={meta} onClose={() => setEdit(null)} onSaved={onChange} />}
+      {bulk && <BulkTools agents={agents} meta={meta} onClose={() => setBulk(false)} onSaved={onChange} />}
     </div>
   );
 }
+
+/** Preview and apply recommended tools to existing agents (adds missing tools, never removes). */
+function BulkTools({ agents, meta, onClose, onSaved }: { agents: Agent[]; meta: Meta; onClose: () => void; onSaved: () => void }) {
+  const label = (id: string) => meta.tools.find((t) => t.id === id)?.label ?? id;
+  const changes = agents
+    .map((a) => {
+      const rec = recommendedTools(a.name, a.role);
+      const add = rec ? rec.filter((t) => !a.tools.includes(t)) : [];
+      return { agent: a, add };
+    })
+    .filter((c) => c.add.length);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(changes.map((c) => c.agent.id)));
+  const [busy, setBusy] = useState(false);
+  return (
+    <Drawer
+      open
+      onClose={onClose}
+      title="Outils recommandés"
+      footer={
+        <>
+          <div className="flex-1 text-xs text-fg-muted">{selected.size} agent(s) sélectionné(s)</div>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!selected.size || busy}
+            onClick={async () => {
+              setBusy(true);
+              for (const c of changes.filter((x) => selected.has(x.agent.id))) await crud.save("agents", { id: c.agent.id, tools: [...c.agent.tools, ...c.add] });
+              onSaved();
+              onClose();
+            }}
+          >
+            Appliquer
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-4 text-sm text-fg-muted">
+        Ajoute les outils dont chaque rôle a besoin pour agir (web, fichiers, commandes, API), d&apos;après les profils prédéfinis. Rien n&apos;est retiré.
+      </p>
+      {!changes.length && <div className="text-sm text-fg-subtle">Tes agents ont déjà les outils recommandés pour leur rôle.</div>}
+      <div className="flex flex-col gap-2">
+        {changes.map(({ agent, add }) => (
+          <label key={agent.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-line bg-surface-1 p-3">
+            <input
+              type="checkbox"
+              className="mt-1 accent-[var(--accent)]"
+              checked={selected.has(agent.id)}
+              onChange={() =>
+                setSelected((s) => {
+                  const n = new Set(s);
+                  if (n.has(agent.id)) n.delete(agent.id);
+                  else n.add(agent.id);
+                  return n;
+                })
+              }
+            />
+            <Avatar emoji={agent.emoji} color={agent.color} size={30} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{agent.name}</span>
+              <span className="mt-1 flex flex-wrap gap-1">
+                {add.map((t) => (
+                  <Badge key={t} color={meta.tools.find((x) => x.id === t)?.danger ? "#f59e0b" : "#10b981"}>
+                    + {label(t)}
+                  </Badge>
+                ))}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </Drawer>
+  );
+}
+
+type Health = { checks: Record<string, { ok: boolean; detail: string }>; tools: Record<string, boolean> };
 
 // ---------------------------------------------------------------- profiles
 
@@ -352,6 +438,8 @@ function AgentEditor({ initial, meta, onClose, onSaved }: { initial: Partial<Age
   const kbs = useData<Kb[]>("/api/crud/kbs");
   const mcp = useData<McpServer[]>("/api/crud/mcp");
   const set = <K extends keyof Agent>(k: K, v: Agent[K]) => setA((x) => ({ ...x, [k]: v }));
+  const health = useData<Health>("/api/tools/health");
+  const recommended = recommendedTools(a.name ?? "", a.role ?? "");
   const chatModels = meta.models.filter((m) => m.kind === "chat");
   const selectedModel = chatModels.find((m) => m.ref === a.model);
 
@@ -486,13 +574,35 @@ function AgentEditor({ initial, meta, onClose, onSaved }: { initial: Partial<Age
           <input type="range" min={0} max={1.2} step={0.1} value={a.temperature} onChange={(e) => set("temperature", Number(e.target.value))} className="accent-[var(--accent)]" />
         </Field>
 
-        <Field label="Outils intégrés" hint="Un petit nombre d'outils ciblés donne de meilleurs résultats avec les modèles locaux.">
+        <Field label="Outils intégrés" hint="Coche ce dont le rôle a besoin pour agir ; évite les outils inutiles, les petits modèles choisissent mieux parmi peu d'outils.">
+          {recommended && recommended.some((t) => !a.tools?.includes(t)) && (
+            <Button size="sm" variant="soft" className="mb-1 self-start" onClick={() => set("tools", [...new Set([...(a.tools ?? []), ...recommended])])}>
+              <Wand2 size={13} /> Ajouter les outils recommandés pour ce rôle
+            </Button>
+          )}
           <ToolChecks meta={meta} value={a.tools ?? []} onChange={(v) => set("tools", v)} />
         </Field>
+        {health.data &&
+          (a.tools ?? [])
+            .filter((t) => health.data!.tools[t] === false)
+            .map((t) => (
+              <div key={t} className="flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <TriangleAlert size={14} className="shrink-0" />
+                {t === "web_search"
+                  ? `La recherche web ne fonctionnera pas : SearXNG (${health.data!.checks.searxng.detail}) et le secours (${health.data!.checks.fallback.detail}) sont indisponibles. Voir Réglages.`
+                  : `« ${meta.tools.find((x) => x.id === t)?.label ?? t} » ne pourra pas fonctionner sur cette machine (voir Réglages → Diagnostic).`}
+              </div>
+            ))}
         {a.tools?.includes("run_command") && (
           <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             <TriangleAlert size={14} className="shrink-0" />
-            Cet agent pourra lancer des commandes shell sur ta machine, dans le dossier de travail de l&apos;équipe, avec ton utilisateur. Réserve-le aux agents de test ou de build.
+            Cet agent pourra lancer des commandes shell sur ta machine, dans le dossier du projet, avec ton utilisateur. Réserve-le aux agents qui construisent ou testent.
+          </div>
+        )}
+        {a.tools?.includes("http_request") && (
+          <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <TriangleAlert size={14} className="shrink-0" />
+            Cet agent pourra appeler des API (y compris POST, PUT, DELETE), sur ta machine ou sur internet. Pendant la revue des tâches, cet outil est désactivé.
           </div>
         )}
 
