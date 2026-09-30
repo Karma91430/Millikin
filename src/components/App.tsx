@@ -163,6 +163,8 @@ export function App() {
               <ProjectsView
                 agents={a}
                 teams={t}
+                projects={projects.data}
+                reloadProjects={projects.reload}
                 runs={runs}
                 onChat={(id) => chatWith({ type: "project", id })}
                 onAgentsChange={refreshAll}

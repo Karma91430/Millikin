@@ -1,4 +1,5 @@
 import { get, getSettings, list, newId, type Agent, type McpServer, type Skill } from "./db";
+import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 import { callMcpTool, listMcpTools } from "./mcp";
 import { search } from "./rag";
@@ -29,7 +30,8 @@ const PHASE_EXECUTION = `## Phase de réalisation (validée par l'utilisateur)
 1. Répartis le travail avec ask_agent : une consigne précise et autonome par membre (objectif, contraintes, fichiers attendus).
 2. Contrôle chaque résultat reçu : s'il est incomplet, faux ou hors sujet, redemande une correction au même membre en expliquant quoi corriger.
 3. Tiens le tableau à jour si tu en as l'outil.
-4. Termine par un compte rendu : ce qui est fait, ce que tu as contrôlé, ce qui reste à faire ou à décider.`;
+4. Consigne les décisions importantes (choix techniques, arbitrages) avec record_decision.
+5. Termine par un compte rendu : ce qui est fait, ce que tu as contrôlé, ce qui reste à faire ou à décider.`;
 
 const FILE_RULES = `## Organisation des fichiers
 Tes outils fichiers agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour voir l'existant.
@@ -74,6 +76,8 @@ export type RunParams = {
   extra?: string[];
   /** Consulted co-lead: gives an opinion only, never delegates. */
   consultOnly?: boolean;
+  /** Tools withheld for this run and its delegations (e.g. board edits during a task review). */
+  excludeTools?: string[];
   emit: Emit;
   signal?: AbortSignal;
   /** Workspace + project shared by every agent of the run (files, commands, tasks). */
@@ -177,11 +181,39 @@ export async function runAgent(p: RunParams): Promise<string> {
       };
     }
 
+    const excluded = new Set(p.excludeTools ?? []);
     for (const [def, impl] of buildTools({ ...p.ctx, agent })) {
+      if (excluded.has(def.function.name)) continue;
       tools.push(def);
       impls[def.function.name] = impl;
     }
-    if (agent.tools?.includes("files_write")) sys.push(FILE_RULES);
+    // First contacts keep the project's decision log up to date.
+    if (team && entries.includes(agent.id) && p.ctx.projectId && !excluded.has("record_decision")) {
+      tools.push({
+        type: "function",
+        function: {
+          name: "record_decision",
+          description: "Consigner une décision du projet dans le journal des décisions (partagé avec toute l'équipe).",
+          parameters: {
+            type: "object",
+            properties: { decision: { type: "string", description: "La décision, en une ou deux phrases" }, raison: { type: "string", description: "Pourquoi" } },
+            required: ["decision"],
+          },
+        },
+      });
+      impls.record_decision = async (a) => {
+        await appendDecision(p.ctx.workspace, String(a.decision ?? "").slice(0, 200), a.raison ? `Raison : ${a.raison}` : "", agent.name);
+        return "Décision consignée dans docs/DECISIONS.md.";
+      };
+    }
+
+    // Everyone working on a project sees the latest decisions.
+    if (p.ctx.projectId) {
+      const log = await readDecisions(p.ctx.workspace);
+      if (log) sys.push(`## Décisions du projet (docs/DECISIONS.md, à respecter)\n${log}`);
+    }
+
+    if (agent.tools?.includes("files_write") && !excluded.has("write_file")) sys.push(FILE_RULES);
     else if (agent.tools?.some((t) => t.startsWith("files_") || t === "run_command"))
       sys.push("## Dossier de travail\nTes outils fichiers et commandes agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour t'orienter.");
 
