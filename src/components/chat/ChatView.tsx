@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Send, Square, Trash2 } from "lucide-react";
+import { ArrowDown, CheckCircle2, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Send, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { specFromTeam } from "@/lib/team";
 import { applyEvent, emptyTrace, type Trace, type TraceEvent } from "@/lib/trace";
@@ -61,6 +61,10 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
   const [focus, setFocus] = useState<string | null>(null);
   const streamRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Auto-scroll only while the reader sits at the bottom; scrolling up pauses it.
+  const followRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   const running = sending || !!runId;
 
   const loadMessages = useCallback(async (id: string) => setMessages(await api<Message[]>(`/api/conversations?id=${id}`)), []);
@@ -70,8 +74,24 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
   }, [conversationId, viewingRef]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    if (followRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, live, pendingUser]);
+
+  const toBottom = () => {
+    followRef.current = true;
+    setAtBottom(true);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  };
+
+  // Grow the composer with its content, up to 40% of the viewport.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const max = window.innerHeight * 0.4;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, [input]);
 
   /** Read a run's SSE stream into the live trace. Aborting only detaches this view. */
   const consume = useCallback(
@@ -181,6 +201,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
     if (!text || running) return;
     if (!override) setInput("");
     setPendingUser(text);
+    toBottom();
     setSending(true);
     setLive(emptyTrace());
     const ctrl = new AbortController();
@@ -345,40 +366,59 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
             </span>
           )}
         </div>
-        <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
-          {!messages.length && !pendingUser && (
-            <div className="rounded-xl border border-dashed border-line p-4 text-sm text-fg-muted">
-              {project && planning ? (
-                <>
-                  <b className="text-fg">Cadrage avant planification.</b> Présente ton projet en quelques phrases, sans tout détailler :{" "}
-                  <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b> vont te poser leurs questions (objectif, périmètre, priorités,
-                  contraintes). Quand tout est clair, clique sur « Valider et créer les tâches » : ils découperont le projet en tâches et en sprints à partir de
-                  votre échange.
-                </>
-              ) : project ? (
-                <>
-                  Présente ton idée ou ta demande à <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b>.
-                  {spec?.clarify
-                    ? " Ils commencent par cadrer : analyse, approche et questions. Quand tout est clair, valide pour qu'ils répartissent le travail et contrôlent les résultats."
-                    : " Ils délèguent aux spécialistes selon les liens de l'équipe."}
-                </>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+              followRef.current = bottom;
+              if (bottom !== atBottom) setAtBottom(bottom);
+            }}
+            className="flex-1 space-y-5 overflow-y-auto px-4 py-4"
+          >
+            {!messages.length && !pendingUser && (
+              <div className="rounded-xl border border-dashed border-line p-4 text-sm text-fg-muted">
+                {project && planning ? (
+                  <>
+                    <b className="text-fg">Cadrage avant planification.</b> Présente ton projet en quelques phrases, sans tout détailler :{" "}
+                    <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b> vont te poser leurs questions (objectif, périmètre, priorités,
+                    contraintes). Quand tout est clair, clique sur « Valider et créer les tâches » : ils découperont le projet en tâches et en sprints à partir de
+                    votre échange.
+                  </>
+                ) : project ? (
+                  <>
+                    Présente ton idée ou ta demande à <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b>.
+                    {spec?.clarify
+                      ? " Ils commencent par cadrer : analyse, approche et questions. Quand tout est clair, valide pour qu'ils répartissent le travail et contrôlent les résultats."
+                      : " Ils délèguent aux spécialistes selon les liens de l'équipe."}
+                  </>
+                ) : (
+                  <>
+                    Pose ta question à <b className="text-fg">{lead.name}</b>.
+                  </>
+                )}{" "}
+                Tu peux changer d&apos;écran pendant qu&apos;ils travaillent : la réponse continue en arrière-plan.
+              </div>
+            )}
+            {messages.map((m) =>
+              m.role === "user" ? (
+                <UserBubble key={m.id} text={m.content} />
               ) : (
-                <>
-                  Pose ta question à <b className="text-fg">{lead.name}</b>.
-                </>
-              )}{" "}
-              Tu peux changer d&apos;écran pendant qu&apos;ils travaillent : la réponse continue en arrière-plan.
-            </div>
+                <AssistantTurn key={m.id} trace={m.trace} agents={agentMap} fallback={m.content} onExpand={setFocus} />
+              ),
+            )}
+            {pendingUser && <UserBubble text={pendingUser} />}
+            {live && <AssistantTurn trace={live} agents={agentMap} onExpand={setFocus} />}
+          </div>
+          {!atBottom && (
+            <button
+              onClick={toBottom}
+              className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-lg shadow-black/40 hover:brightness-110"
+            >
+              <ArrowDown size={12} /> {running ? "Suivre la réponse" : "Aller en bas"}
+            </button>
           )}
-          {messages.map((m) =>
-            m.role === "user" ? (
-              <UserBubble key={m.id} text={m.content} />
-            ) : (
-              <AssistantTurn key={m.id} trace={m.trace} agents={agentMap} fallback={m.content} onExpand={setFocus} />
-            ),
-          )}
-          {pendingUser && <UserBubble text={pendingUser} />}
-          {live && <AssistantTurn trace={live} agents={agentMap} onExpand={setFocus} />}
         </div>
         <div className="border-t border-line p-3">
           {awaitingApproval && (
@@ -409,9 +449,10 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
                   send();
                 }
               }}
-              rows={Math.min(6, Math.max(1, input.split("\n").length))}
+              ref={inputRef}
+              rows={1}
               placeholder={running ? "Réponse en cours…" : `Message à ${lead.name}…`}
-              className="max-h-40 flex-1 resize-none bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-fg-subtle"
+              className="flex-1 resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-fg-subtle"
             />
             {running ? (
               <Button variant="danger" size="sm" onClick={stop} disabled={!runId} title="Arrêter la réponse">
