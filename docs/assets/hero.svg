@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-labelledby="t d">
+  <title id="t">Millikin agent graph</title>
+  <desc id="d">A user talks to two first contacts, a project lead and a tech lead, who delegate work to a developer and a tester.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#11141b"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1.2" cy="1.2" r="1.2" fill="#242a36"/>
+    </pattern>
+    <marker id="arrowV" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#10b981"/>
+    </marker>
+    <marker id="arrowP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#ec4899"/>
+    </marker>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .t { font-family: Inter, "Segoe UI", Helvetica, Arial, sans-serif; fill: #e6e8ee; }
+      .m { fill: #9aa3b5; }
+      .s { fill: #697287; }
+      .card { fill: #11141b; stroke: #353d4d; stroke-width: 1.5; }
+      .bubble { fill: #171b24; stroke-width: 1.2; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="560" rx="24" fill="url(#bg)"/>
+  <rect width="1200" height="560" rx="24" fill="url(#dots)" opacity=".7"/>
+
+  <!-- edges -->
+  <path d="M235 280 C 300 280, 300 200, 360 200" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 6"/>
+  <path d="M235 280 C 300 280, 300 360, 360 360" fill="none" stroke="#353d4d" stroke-width="1.8" stroke-dasharray="5 5"/>
+  <path d="M600 360 C 700 360, 700 250, 800 250" fill="none" stroke="#10b981" stroke-width="2.5" marker-end="url(#arrowV)" stroke-dasharray="6 6"/>
+  <path d="M600 360 C 700 360, 700 430, 800 430" fill="none" stroke="#ec4899" stroke-width="1.8" marker-end="url(#arrowP)"/>
+  <path d="M480 230 L 480 330" fill="none" stroke="#6366f1" stroke-width="1.6" stroke-dasharray="3 5"/>
+  <circle cx="712" cy="286" r="6" fill="#10b981" filter="url(#glow)"/>
+  <circle cx="300" cy="238" r="5" fill="#f59e0b" filter="url(#glow)"/>
+
+  <!-- user -->
+  <rect x="85" y="252" width="150" height="56" rx="16" class="card" stroke-dasharray="4 4"/>
+  <circle cx="115" cy="280" r="17" fill="#1f2430"/>
+  <text x="115" y="286" text-anchor="middle" font-size="18" class="t">🙂</text>
+  <text x="142" y="276" font-size="15" font-weight="600" class="t">You</text>
+  <text x="142" y="294" font-size="11" class="t s">waiting for the team</text>
+
+  <!-- user bubble -->
+  <rect x="60" y="130" width="230" height="84" rx="16" class="bubble" stroke="#94a3b855"/>
+  <text x="76" y="158" font-size="13" class="t">I'd like a small CLI to convert</text>
+  <text x="76" y="178" font-size="13" class="t">temperatures (°C, °F, K).</text>
+  <text x="76" y="198" font-size="13" class="t">Can the team build it?</text>
+
+  <!-- project lead (first contact) -->
+  <rect x="360" y="172" width="240" height="60" rx="18" class="card" stroke="#f59e0b" stroke-width="2"/>
+  <circle cx="392" cy="202" r="20" fill="#f59e0b26" stroke="#f59e0b" stroke-width="2"/>
+  <text x="392" y="209" text-anchor="middle" font-size="18" class="t">📅</text>
+  <text x="422" y="198" font-size="15" font-weight="600" class="t">Project lead</text>
+  <text x="422" y="216" font-size="11" fill="#f59e0b" class="t" style="fill:#f59e0b">★ first contact · writing…</text>
+
+  <!-- lead bubble -->
+  <rect x="330" y="40" width="300" height="104" rx="16" class="bubble" stroke="#f59e0b66"/>
+  <text x="346" y="66" font-size="13" font-weight="600" class="t">Scoping, with the tech lead:</text>
+  <text x="346" y="88" font-size="13" class="t">Python CLI with argparse, 2-decimal</text>
+  <text x="346" y="108" font-size="13" class="t">rounding, tests in tests/. Two questions</text>
+  <text x="346" y="128" font-size="13" class="t">before we start ▍</text>
+
+  <!-- tech lead (first contact) -->
+  <rect x="360" y="330" width="240" height="60" rx="18" class="card" stroke="#6366f1" stroke-width="2"/>
+  <circle cx="392" cy="360" r="20" fill="#6366f126" stroke="#6366f1" stroke-width="2"/>
+  <text x="392" y="367" text-anchor="middle" font-size="18" class="t">🧑‍💻</text>
+  <text x="422" y="356" font-size="15" font-weight="600" class="t">Tech lead</text>
+  <text x="422" y="374" font-size="11" class="t" style="fill:#6366f1">★ first contact · reviewing</text>
+
+  <!-- edge label -->
+  <rect x="640" y="296" width="150" height="40" rx="12" fill="#171b24" stroke="#10b98166"/>
+  <text x="652" y="314" font-size="11" class="t">💬 Write src/converter.py</text>
+  <text x="652" y="328" font-size="11" class="t m">with argparse + rounding</text>
+
+  <!-- developer -->
+  <rect x="800" y="220" width="240" height="60" rx="18" class="card" stroke="#10b981" stroke-width="2"/>
+  <circle cx="832" cy="250" r="20" fill="#10b98126" stroke="#10b981" stroke-width="2"/>
+  <text x="832" y="257" text-anchor="middle" font-size="18" class="t">💻</text>
+  <text x="862" y="246" font-size="15" font-weight="600" class="t">Developer</text>
+  <text x="862" y="264" font-size="11" class="t" style="fill:#10b981">writing files…</text>
+  <rect x="800" y="120" width="300" height="80" rx="16" class="bubble" stroke="#10b98166"/>
+  <text x="816" y="146" font-size="13" class="t">✍️ write_file src/converter.py</text>
+  <text x="816" y="168" font-size="13" class="t">✍️ write_file tests/test_converter.py</text>
+  <text x="816" y="188" font-size="13" class="t m">Done: 2 files, 41 lines ▍</text>
+
+  <!-- tester -->
+  <rect x="800" y="400" width="240" height="60" rx="18" class="card"/>
+  <circle cx="832" cy="430" r="20" fill="#ec489926" stroke="#ec4899" stroke-width="2"/>
+  <text x="832" y="437" text-anchor="middle" font-size="18" class="t">🧪</text>
+  <text x="862" y="426" font-size="15" font-weight="600" class="t">Tester</text>
+  <text x="862" y="444" font-size="11" class="t s">waiting for the code</text>
+
+  <!-- footer caption -->
+  <text x="60" y="524" font-size="13" class="t s">Millikin · local AI agent teams on Ollama — scoping, delegation, review, live.</text>
+</svg>
