@@ -1,48 +1,134 @@
 "use client";
 
-import { FileText, Library, Plus, Search, Trash2, Upload } from "lucide-react";
+import { FileText, Library, Network, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, crud, useData, type Kb } from "../api";
-import { Button, Card, cx, Empty, ErrorNote, Field, Input, Modal, PageHeader, Textarea } from "../ui";
+import { KnowledgeGraph, tagColor, type GDoc } from "../KnowledgeGraph";
+import { Badge, Button, Card, cx, Drawer, Empty, ErrorNote, Field, Input, Modal, PageHeader, Textarea } from "../ui";
 
-type Doc = { id: string; name: string; chars: number; chunks: number; created_at: number };
-type Hit = { text: string; doc: string; kb: string; score: number };
+type Doc = { id: string; kb_id: string; name: string; chars: number; chunks: number; tags: string[]; created_at: number };
+type Hit = { text: string; doc: string; kb: string; tags: string[]; score: number };
 
 export function KnowledgeView() {
   const kbs = useData<Kb[]>("/api/crud/kbs");
+  const [view, setView] = useState<"list" | "graph">("list");
   const [sel, setSel] = useState<string | null>(null);
   const [create, setCreate] = useState(false);
+  const [openDoc, setOpenDoc] = useState<GDoc | null>(null);
   const kb = kbs.data?.find((k) => k.id === sel) ?? kbs.data?.[0];
   return (
     <div className="flex h-full flex-col">
       <PageHeader
         title="Connaissances"
-        subtitle="RAG interne : tes documents sont découpés et indexés avec un modèle d'embedding local, puis servis aux agents."
+        subtitle="RAG interne : documents découpés et indexés localement, organisés par tags. Les projets choisissent quelles bases et quels tags leurs agents utilisent."
         actions={
-          <Button variant="primary" onClick={() => setCreate(true)}>
-            <Plus size={15} /> Nouvelle base
-          </Button>
+          <>
+            <div className="flex rounded-lg border border-line p-0.5">
+              {(
+                [
+                  ["list", "Bases", Library],
+                  ["graph", "Graphe", Network],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button key={id} onClick={() => setView(id)} className={cx("flex items-center gap-1.5 rounded-md px-3 py-1 text-sm", view === id ? "bg-surface-3 text-fg" : "text-fg-muted")}>
+                  <Icon size={14} /> {label}
+                </button>
+              ))}
+            </div>
+            <Button variant="primary" onClick={() => setCreate(true)}>
+              <Plus size={15} /> Nouvelle base
+            </Button>
+          </>
         }
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-6 lg:grid-cols-[260px_1fr]">
-        <div className="flex flex-col gap-2">
-          {(kbs.data ?? []).map((k) => (
-            <Card key={k.id} onClick={() => setSel(k.id)} className={cx("p-3", kb?.id === k.id && "border-accent")}>
-              <div className="text-sm font-medium">📚 {k.name}</div>
-              <div className="line-clamp-2 text-xs text-fg-muted">{k.description}</div>
-            </Card>
-          ))}
+      {view === "graph" ? (
+        <div className="min-h-0 flex-1">
+          <KnowledgeGraph onOpenDoc={setOpenDoc} />
         </div>
-        {kb ? (
-          <KbDetail key={kb.id} kb={kb} onDeleted={() => (setSel(null), kbs.reload())} />
-        ) : (
-          <Empty icon={<Library size={28} />} title="Aucune base de connaissances">
-            Crée une base, importe des documents (texte, Markdown, code, PDF), puis attache-la à un agent.
-          </Empty>
-        )}
-      </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-6 lg:grid-cols-[260px_1fr]">
+          <div className="flex flex-col gap-2">
+            {(kbs.data ?? []).map((k) => (
+              <Card key={k.id} onClick={() => setSel(k.id)} className={cx("p-3", kb?.id === k.id && "border-accent")}>
+                <div className="text-sm font-medium">📚 {k.name}</div>
+                <div className="line-clamp-2 text-xs text-fg-muted">{k.description}</div>
+              </Card>
+            ))}
+          </div>
+          {kb ? (
+            <KbDetail key={kb.id} kb={kb} onDeleted={() => (setSel(null), kbs.reload())} />
+          ) : (
+            <Empty icon={<Library size={28} />} title="Aucune base de connaissances">
+              Crée une base, importe des documents (texte, Markdown, code, PDF) avec des tags, puis connecte-la à un projet.
+            </Empty>
+          )}
+        </div>
+      )}
       <CreateKb open={create} onClose={() => setCreate(false)} onCreated={(id) => (setSel(id), kbs.reload())} />
+      {openDoc && <DocDrawer doc={openDoc} onClose={() => setOpenDoc(null)} />}
     </div>
+  );
+}
+
+/** Editable tag chips with an AI suggestion button. */
+function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; onChange: (t: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async (next: string[]) => {
+    const r = await api<{ tags: string[] }>("/api/kb", { method: "PATCH", json: { docId, tags: next } });
+    onChange(r.tags);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {tags.map((t) => (
+        <span key={t} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(t) }}>
+          #{t}
+          <button onClick={() => save(tags.filter((x) => x !== t))} aria-label={`retirer ${t}`} className="opacity-70 hover:opacity-100">
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (draft.trim()) save([...tags, draft]).then(() => setDraft(""));
+        }}
+      >
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="+ tag" className="h-6 w-20 rounded-md border border-line bg-surface-1 px-1.5 text-[11px] outline-none focus:border-accent" />
+      </form>
+      <button
+        disabled={busy}
+        title="Suggérer des tags avec l'IA"
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await api<{ tags: string[] }>("/api/kb/tags", { method: "POST", json: { docId } });
+            await save([...new Set([...tags, ...r.tags])]);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50"
+      >
+        <Sparkles size={11} /> {busy ? "…" : "suggérer"}
+      </button>
+    </div>
+  );
+}
+
+function DocDrawer({ doc, onClose }: { doc: GDoc; onClose: () => void }) {
+  const [tags, setTags] = useState(doc.tags);
+  return (
+    <Drawer open onClose={onClose} title={`📄 ${doc.name}`}>
+      <div className="flex flex-col gap-4 text-sm">
+        <div className="text-fg-muted">
+          Base : <b className="text-fg">{doc.kb}</b> · {doc.chunks} passages · {Math.round(doc.chars / 1000)}k caractères
+        </div>
+        <Field label="Tags" hint="Les tags regroupent les documents en constellations et servent de filtres pour les projets et la recherche.">
+          <TagEditor docId={doc.id} tags={tags} onChange={setTags} />
+        </Field>
+      </div>
+    </Drawer>
   );
 }
 
@@ -51,14 +137,18 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [paste, setPaste] = useState({ name: "", text: "" });
+  const [uploadTags, setUploadTags] = useState("");
   const [q, setQ] = useState("");
+  const [qTag, setQTag] = useState<string | null>(null);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const tagsInUse = [...new Set((docs.data ?? []).flatMap((d) => d.tags))].sort();
 
   async function upload(files: FileList | File[]) {
     const fd = new FormData();
     fd.set("kbId", kb.id);
+    fd.set("tags", uploadTags);
     for (const f of Array.from(files)) fd.append("files", f);
     setBusy(true);
     setError(undefined);
@@ -95,34 +185,36 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
       </div>
       <ErrorNote>{error && <pre className="whitespace-pre-wrap font-sans">{error}</pre>}</ErrorNote>
 
-      <div
-        onDragOver={(e) => (e.preventDefault(), setDrag(true))}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDrag(false);
-          upload(e.dataTransfer.files);
-        }}
-        onClick={() => fileRef.current?.click()}
-        className={cx(
-          "flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed p-6 text-center transition",
-          drag ? "border-accent bg-accent/5" : "border-line hover:border-line-strong",
-        )}
-      >
-        <Upload size={20} className="text-fg-muted" />
-        <div className="text-sm">{busy ? "Indexation en cours…" : "Dépose des fichiers ou clique pour choisir"}</div>
-        <div className="text-xs text-fg-subtle">.txt .md .pdf .json .csv, code source…</div>
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files?.length) upload(e.target.files);
-            e.target.value = "";
+      <Card className="flex flex-col gap-3 p-3">
+        <Field label="Tags appliqués aux prochains imports (séparés par des virgules)">
+          <Input value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} placeholder="ex : commander, règles" />
+        </Field>
+        <div
+          onDragOver={(e) => (e.preventDefault(), setDrag(true))}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDrag(false);
+            upload(e.dataTransfer.files);
           }}
-        />
-      </div>
+          onClick={() => fileRef.current?.click()}
+          className={cx("flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed p-6 text-center transition", drag ? "border-accent bg-accent/5" : "border-line hover:border-line-strong")}
+        >
+          <Upload size={20} className="text-fg-muted" />
+          <div className="text-sm">{busy ? "Indexation en cours…" : "Dépose des fichiers ou clique pour choisir"}</div>
+          <div className="text-xs text-fg-subtle">.txt .md .pdf .json .csv, code source…</div>
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) upload(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      </Card>
 
       <Card className="flex flex-col gap-2 p-3">
         <div className="text-sm font-medium">Coller du texte</div>
@@ -136,7 +228,7 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
             onClick={async () => {
               setBusy(true);
               try {
-                await api("/api/kb", { method: "POST", json: { kbId: kb.id, name: paste.name, text: paste.text } });
+                await api("/api/kb", { method: "POST", json: { kbId: kb.id, name: paste.name, text: paste.text, tags: uploadTags.split(",") } });
                 setPaste({ name: "", text: "" });
                 docs.reload();
               } catch (e) {
@@ -154,13 +246,14 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
       <Card>
         <div className="border-b border-line px-3 py-2 text-sm font-medium">Documents ({docs.data?.length ?? 0})</div>
         {(docs.data ?? []).map((d) => (
-          <div key={d.id} className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-0">
-            <FileText size={14} className="text-fg-muted" />
+          <div key={d.id} className="flex items-start gap-3 border-b border-line px-3 py-2.5 last:border-0">
+            <FileText size={14} className="mt-0.5 text-fg-muted" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm">{d.name}</div>
-              <div className="text-xs text-fg-subtle">
+              <div className="mb-1 text-xs text-fg-subtle">
                 {d.chunks} passages · {Math.round(d.chars / 1000)}k caractères
               </div>
+              <TagEditor docId={d.id} tags={d.tags} onChange={(t) => docs.setData((xs) => xs?.map((x) => (x.id === d.id ? { ...x, tags: t } : x)))} />
             </div>
             <Button
               size="sm"
@@ -179,12 +272,26 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
 
       <Card className="flex flex-col gap-2 p-3">
         <div className="text-sm font-medium">Tester la recherche</div>
+        {tagsInUse.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {tagsInUse.map((t) => (
+              <button
+                key={t}
+                onClick={() => setQTag(qTag === t ? null : t)}
+                className={cx("rounded-full border px-2 py-0.5 text-[11px]", qTag === t ? "text-white" : "text-fg-muted")}
+                style={{ borderColor: tagColor(t), background: qTag === t ? tagColor(t) : undefined }}
+              >
+                #{t}
+              </button>
+            ))}
+          </div>
+        )}
         <form
           className="flex gap-2"
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              setHits(await api<Hit[]>("/api/kb/search", { method: "POST", json: { kbIds: [kb.id], query: q } }));
+              setHits(await api<Hit[]>("/api/kb/search", { method: "POST", json: { kbIds: [kb.id], query: q, tags: qTag ? [qTag] : [] } }));
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             }
@@ -197,9 +304,16 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
         </form>
         {hits?.map((h, i) => (
           <div key={i} className="rounded-lg bg-surface-2 p-2.5 text-xs">
-            <div className="mb-1 flex justify-between text-fg-subtle">
-              <span>{h.doc}</span>
-              <span>score {h.score.toFixed(3)}</span>
+            <div className="mb-1 flex justify-between gap-2 text-fg-subtle">
+              <span className="truncate">{h.doc}</span>
+              <span className="shrink-0">score {h.score.toFixed(3)}</span>
+            </div>
+            <div className="mb-1 flex flex-wrap gap-1">
+              {h.tags.map((t) => (
+                <Badge key={t} color={tagColor(t)}>
+                  #{t}
+                </Badge>
+              ))}
             </div>
             <div className="line-clamp-4 whitespace-pre-wrap text-fg-muted">{h.text}</div>
           </div>

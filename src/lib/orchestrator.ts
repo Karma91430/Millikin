@@ -1,8 +1,9 @@
-import { get, getSettings, list, newId, type Agent, type McpServer, type Skill } from "./db";
+import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 import { callMcpTool, listMcpTools } from "./mcp";
-import { search } from "./rag";
+import { search, tagCounts } from "./rag";
+import { normalizeResources } from "./resources";
 import { reportsOf, type TeamSpec } from "./team";
 import { buildTools, type ToolContext } from "./tools";
 import type { TraceEvent } from "./trace";
@@ -207,53 +208,70 @@ export async function runAgent(p: RunParams): Promise<string> {
       };
     }
 
-    // Everyone working on a project sees the latest decisions.
-    if (p.ctx.projectId) {
-      const log = await readDecisions(p.ctx.workspace);
-      if (log) sys.push(`## Décisions du projet (docs/DECISIONS.md, à respecter)\n${log}`);
-    }
-
     if (agent.tools?.includes("files_write") && !excluded.has("write_file")) sys.push(FILE_RULES);
     else if (agent.tools?.some((t) => t.startsWith("files_") || t === "run_command"))
       sys.push("## Dossier de travail\nTes outils fichiers et commandes agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour t'orienter.");
 
-    // Internal RAG: auto-inject the best passages, and expose a search tool for follow-ups.
-    const kbIds = agent.kb_ids ?? [];
-    if (kbIds.length) {
-      try {
-        const hits = await search(kbIds, p.input, 4);
-        if (hits.length)
-          sys.push("## Extraits de la base de connaissances (cite la source)\n" + hits.map((h) => `[${h.doc}] (score ${h.score.toFixed(2)})\n${h.text}`).join("\n---\n"));
-      } catch (e) {
-        emit({ type: "tool_result", callId, toolCallId: "rag", result: `RAG indisponible : ${String(e)}`, error: true });
+    // Everything below changes from call to call: it goes after the stable part of the prompt,
+    // so Ollama can reuse its cache for the common prefix.
+    const dynamic: string[] = [];
+
+    // Project resources: knowledge and MCP servers are granted per agent in the project's team settings.
+    const project = p.ctx.projectId ? get<Project>("projects", p.ctx.projectId) : undefined;
+    const res = normalizeResources(project?.resources);
+    const rag = res.rag.kb_ids.length && res.rag.agent_ids.includes(agent.id) ? res.rag : null;
+    if (rag && !excluded.has("search_knowledge")) {
+      const tagsInUse = tagCounts(rag.kb_ids).map((t) => t.tag).filter((t) => !rag.tags.length || rag.tags.includes(t));
+      if (rag.mode === "auto") {
+        try {
+          const hits = await search(rag.kb_ids, p.input, rag.top_k, { tags: rag.tags });
+          if (hits.length)
+            dynamic.push("## Extraits de la base de connaissances (cite la source)\n" + hits.map((h) => `[${h.doc}${h.tags.length ? ` · ${h.tags.join(", ")}` : ""}] (score ${h.score.toFixed(2)})\n${h.text}`).join("\n---\n"));
+        } catch (e) {
+          emit({ type: "tool_result", callId, toolCallId: "rag", result: `RAG indisponible : ${String(e)}`, error: true });
+        }
       }
       tools.push({
         type: "function",
         function: {
           name: "search_knowledge",
-          description: "Rechercher dans la base de connaissances interne.",
-          parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          description: "Rechercher dans la base de connaissances interne du projet (documents indexés). Renvoie les passages les plus pertinents avec leur source.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "question ou mots-clés" },
+              ...(tagsInUse.length ? { tag: { type: "string", enum: tagsInUse, description: "limiter à une thématique (optionnel)" } } : {}),
+            },
+            required: ["query"],
+          },
         },
       });
       impls.search_knowledge = async (a) => {
-        const hits = await search(kbIds, String(a.query ?? ""), 5);
-        return hits.length ? hits.map((h) => `[${h.doc}] ${h.text}`).join("\n---\n") : "Aucun passage pertinent.";
+        const tags = a.tag && tagsInUse.includes(String(a.tag)) ? [String(a.tag)] : rag.tags;
+        const hits = await search(rag.kb_ids, String(a.query ?? ""), Math.max(5, rag.top_k), { tags });
+        return hits.length ? hits.map((h) => `[${h.doc}${h.tags.length ? ` · ${h.tags.join(", ")}` : ""}] ${h.text}`).join("\n---\n") : "Aucun passage pertinent.";
       };
     }
 
-    // MCP servers attached to this agent.
-    for (const id of agent.mcp_ids ?? []) {
-      const server = get<McpServer>("mcp", id);
+    for (const m of res.mcp.filter((x) => x.agent_ids.includes(agent.id))) {
+      const server = get<McpServer>("mcp", m.server_id);
       if (!server?.enabled) continue;
       try {
         for (const t of await listMcpTools(server)) {
           const name = `${slugify(server.name)}__${t.name}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+          if (excluded.has(name)) continue;
           tools.push({ type: "function", function: { name, description: t.description?.slice(0, 1000) || t.name, parameters: t.inputSchema ?? { type: "object", properties: {} } } });
           impls[name] = (a) => callMcpTool(server, t.name, a);
         }
       } catch (e) {
-        sys.push(`(Le serveur MCP « ${server.name} » est indisponible : ${e instanceof Error ? e.message : e})`);
+        dynamic.push(`(Le serveur MCP « ${server.name} » est indisponible : ${e instanceof Error ? e.message : e})`);
       }
+    }
+
+    // Everyone working on a project sees the latest decisions.
+    if (p.ctx.projectId) {
+      const log = await readDecisions(p.ctx.workspace);
+      if (log) dynamic.push(`## Décisions du projet (docs/DECISIONS.md, à respecter)\n${log}`);
     }
 
     // ---- concertation: the speaker consults the other first contacts before answering
@@ -265,15 +283,16 @@ export async function runAgent(p: RunParams): Promise<string> {
           return `### ${c.emoji} ${c.name} (${c.role})\n${out}`;
         }),
       );
-      sys.push(
+      dynamic.push(
         "## Avis de tes co-responsables\n" +
           opinions.join("\n\n") +
           "\n\nRédige une réponse commune qui intègre ces avis (cite qui a soulevé quel point quand c'est utile) et regroupe les questions sans doublon.",
       );
     }
 
-    if (p.extra?.length) sys.push(...p.extra);
-    sys.push(`Date du jour : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "full" })}.`);
+    if (p.extra?.length) dynamic.push(...p.extra);
+    dynamic.push(`Date du jour : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "full" })}.`);
+    sys.push(...dynamic);
 
     const messages: ChatMessage[] = [{ role: "system", content: sys.join("\n\n") }, ...(p.history ?? []), { role: "user", content: p.input }];
     const toolsOk = resolveModel(agent.model).row?.supports_tools !== false;

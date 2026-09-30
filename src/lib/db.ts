@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { seed } from "./seed";
+import type { ProjectResources } from "./resources";
 import { specFromTeam, type TeamSpec } from "./team";
 
 const DATA_DIR = process.env.MILLIKIN_DATA_DIR || path.join(process.cwd(), "data");
@@ -84,6 +85,8 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "complexity", "INTEGER DEFAULT 0"],
   ["tasks", "sprint_id", "TEXT DEFAULT ''"],
   ["usage_logs", "project_id", "TEXT DEFAULT ''"],
+  ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
+  ["projects", "resources", "TEXT DEFAULT '{}'"],
 ];
 
 const slugify = (s: string) =>
@@ -209,7 +212,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     cols: ["name", "description", "lead_id", "member_ids", "workspace", "links", "entry_ids", "layout", "clarify", "concert"],
     order: "created_at",
   },
-  projects: { table: "projects", json: ["team"], bool: [], cols: ["name", "description", "path", "template_id", "team"], order: "updated_at DESC" },
+  projects: { table: "projects", json: ["team", "resources"], bool: [], cols: ["name", "description", "path", "template_id", "team", "resources"], order: "updated_at DESC" },
   tasks: {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
@@ -334,7 +337,7 @@ export type Team = {
   clarify: boolean;
   concert: boolean;
 };
-export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec };
+export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources };
 export type Evaluation = { verdict: "valide" | "a_corriger"; score: number; comment: string; by: string; at: number };
 export type Task = {
   id: string;

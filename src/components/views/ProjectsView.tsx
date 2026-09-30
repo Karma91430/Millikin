@@ -29,6 +29,7 @@ import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
 import { CallFocus } from "../chat/CallFocus";
+import { ProjectResourcesPanel } from "../ProjectResources";
 import { TeamBuilder } from "../TeamBuilder";
 import { Avatar, Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, Select, Textarea } from "../ui";
 import { useRunTrace } from "../useRunTrace";
@@ -400,8 +401,30 @@ function ProjectDetail({
         {tab === "tasks" && <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} />}
         {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
-        {tab === "team" && <ProjectTeam project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
+        {tab === "team" && <TeamTab project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
       </div>
+    </div>
+  );
+}
+
+/** Team tab: the project's own team composition, and the resources each member may use. */
+function TeamTab(props: { project: Project; agents: Agent[]; onSaved: () => void; onAgentsChange: () => void }) {
+  const [sub, setSub] = useState<"composition" | "resources">("composition");
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex gap-1 px-6 pt-4">
+        {(
+          [
+            ["composition", "Composition"],
+            ["resources", "Ressources (connaissances & MCP)"],
+          ] as const
+        ).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)} className={cx("rounded-lg px-3 py-1 text-sm", sub === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {sub === "composition" ? <ProjectTeam {...props} /> : <ProjectResourcesPanel key={props.project.id} project={props.project} agents={props.agents} onSaved={props.onSaved} />}
     </div>
   );
 }
