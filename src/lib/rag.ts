@@ -1,5 +1,5 @@
-import { db, newId, now } from "./db";
-import { embed } from "./gateway";
+import { db, list, newId, now } from "./db";
+import { complete, embed } from "./gateway";
 
 const CHUNK = 900;
 const OVERLAP = 150;
@@ -37,7 +37,11 @@ export async function extractText(name: string, bytes: Uint8Array): Promise<stri
   return new TextDecoder().decode(bytes);
 }
 
-export async function addDocument(kbId: string, name: string, text: string) {
+/** Tags are stored lower-case and trimmed, so filters match regardless of how they were typed. */
+export const normTags = (tags: unknown): string[] =>
+  [...new Set((Array.isArray(tags) ? tags : typeof tags === "string" ? tags.split(",") : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))].slice(0, 12);
+
+export async function addDocument(kbId: string, name: string, text: string, tags: string[] = []) {
   const chunks = chunkText(text);
   if (!chunks.length) throw new Error(`« ${name} » ne contient pas de texte exploitable`);
   const vectors = await embed(chunks.map((c) => `${name}\n${c}`));
@@ -45,7 +49,15 @@ export async function addDocument(kbId: string, name: string, text: string) {
   const d = db();
   d.exec("BEGIN");
   try {
-    d.prepare("INSERT INTO kb_docs (id, kb_id, name, chars, chunks, created_at) VALUES (?,?,?,?,?,?)").run(docId, kbId, name, text.length, chunks.length, now());
+    d.prepare("INSERT INTO kb_docs (id, kb_id, name, chars, chunks, tags, created_at) VALUES (?,?,?,?,?,?,?)").run(
+      docId,
+      kbId,
+      name,
+      text.length,
+      chunks.length,
+      JSON.stringify(normTags(tags)),
+      now(),
+    );
     const ins = d.prepare("INSERT INTO kb_chunks (id, kb_id, doc_id, idx, text, embedding) VALUES (?,?,?,?,?,?)");
     chunks.forEach((c, i) => ins.run(newId(), kbId, docId, i, c, new Uint8Array(new Float32Array(vectors[i]).buffer)));
     d.exec("COMMIT");
@@ -61,28 +73,150 @@ export function removeDocument(docId: string) {
   db().prepare("DELETE FROM kb_docs WHERE id = ?").run(docId);
 }
 
-export type Hit = { text: string; doc: string; kb: string; score: number };
+export function setDocumentTags(docId: string, tags: unknown) {
+  const clean = normTags(tags);
+  db().prepare("UPDATE kb_docs SET tags = ? WHERE id = ?").run(JSON.stringify(clean), docId);
+  return clean;
+}
 
-export async function search(kbIds: string[], query: string, k = 4): Promise<Hit[]> {
-  if (!kbIds.length || !query.trim()) return [];
+type DocRow = { id: string; kb_id: string; name: string; chars: number; chunks: number; tags: string; created_at: number };
+const parseTags = (s: string) => {
+  try {
+    return normTags(JSON.parse(s || "[]"));
+  } catch {
+    return [];
+  }
+};
+
+export function listDocuments(kbIds?: string[]) {
+  const rows = (
+    kbIds?.length
+      ? db().prepare(`SELECT * FROM kb_docs WHERE kb_id IN (${kbIds.map(() => "?").join(",")}) ORDER BY created_at DESC`).all(...kbIds)
+      : db().prepare("SELECT * FROM kb_docs ORDER BY created_at DESC").all()
+  ) as DocRow[];
+  return rows.map((r) => ({ ...r, tags: parseTags(r.tags) }));
+}
+
+/** Tags in use, with how many documents carry each. */
+export function tagCounts(kbIds?: string[]): { tag: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const d of listDocuments(kbIds)) for (const t of d.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+// Repeated questions (retries, co-leads, several agents) reuse the query embedding.
+const g = globalThis as unknown as { __millikinQueryEmb?: Map<string, number[]> };
+const queryCache = (g.__millikinQueryEmb ??= new Map());
+async function embedQuery(query: string): Promise<number[]> {
+  const key = query.trim().toLowerCase();
+  const hit = queryCache.get(key);
+  if (hit) return hit;
   const [q] = await embed([query]);
-  const qn = Math.hypot(...q);
+  queryCache.set(key, q);
+  if (queryCache.size > 300) queryCache.delete(queryCache.keys().next().value!);
+  return q;
+}
+
+const vec = (u8: Uint8Array) => new Float32Array(u8.slice().buffer);
+function cosine(a: ArrayLike<number>, b: ArrayLike<number>) {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+export type Hit = { text: string; doc: string; docId: string; kb: string; tags: string[]; score: number };
+
+/** Semantic search over knowledge bases, optionally restricted to documents carrying one of `tags`. */
+export async function search(kbIds: string[], query: string, k = 4, opts: { tags?: string[] } = {}): Promise<Hit[]> {
+  if (!kbIds.length || !query.trim()) return [];
+  const q = await embedQuery(query);
+  const want = normTags(opts.tags ?? []);
   const rows = db()
     .prepare(
-      `SELECT c.text, c.embedding, d.name AS doc, k.name AS kb FROM kb_chunks c
+      `SELECT c.text, c.embedding, d.id AS doc_id, d.name AS doc, d.tags AS tags, k.name AS kb FROM kb_chunks c
        JOIN kb_docs d ON d.id = c.doc_id JOIN kbs k ON k.id = c.kb_id
        WHERE c.kb_id IN (${kbIds.map(() => "?").join(",")})`,
     )
-    .all(...kbIds) as { text: string; embedding: Uint8Array; doc: string; kb: string }[];
-  const hits = rows.map((r) => {
-    const v = new Float32Array(r.embedding.slice().buffer);
-    let dot = 0;
-    let n = 0;
-    for (let i = 0; i < v.length; i++) {
-      dot += v[i] * q[i];
-      n += v[i] * v[i];
-    }
-    return { text: r.text, doc: r.doc, kb: r.kb, score: dot / (Math.sqrt(n) * qn || 1) };
-  });
+    .all(...kbIds) as { text: string; embedding: Uint8Array; doc_id: string; doc: string; tags: string; kb: string }[];
+  const hits: Hit[] = [];
+  for (const r of rows) {
+    const tags = parseTags(r.tags);
+    if (want.length && !tags.some((t) => want.includes(t))) continue;
+    hits.push({ text: r.text, doc: r.doc, docId: r.doc_id, kb: r.kb, tags, score: cosine(vec(r.embedding), q) });
+  }
   return hits.sort((a, b) => b.score - a.score).slice(0, k);
+}
+
+/** Documents as graph nodes plus similarity links (mean chunk embeddings, top 2 neighbours above a threshold). */
+export function knowledgeGraph(kbIds?: string[]) {
+  const docs = listDocuments(kbIds).slice(0, 400);
+  const kbs = new Map(list<{ id: string; name: string }>("kbs").map((k) => [k.id, k.name]));
+  const centroids = new Map<string, Float32Array>();
+  const stmt = db().prepare("SELECT embedding FROM kb_chunks WHERE doc_id = ?");
+  for (const d of docs) {
+    const rows = stmt.all(d.id) as { embedding: Uint8Array }[];
+    if (!rows.length) continue;
+    const first = vec(rows[0].embedding);
+    const sum = new Float32Array(first.length);
+    for (const r of rows) {
+      const v = vec(r.embedding);
+      for (let i = 0; i < sum.length; i++) sum[i] += v[i];
+    }
+    centroids.set(d.id, sum);
+  }
+  const links: { source: string; target: string; score: number }[] = [];
+  const seen = new Set<string>();
+  for (const a of docs) {
+    const ca = centroids.get(a.id);
+    if (!ca) continue;
+    const near = docs
+      .filter((b) => b.id !== a.id && centroids.has(b.id))
+      .map((b) => ({ id: b.id, score: cosine(ca, centroids.get(b.id)!) }))
+      .filter((x) => x.score > 0.72)
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 2);
+    for (const n of near) {
+      const key = [a.id, n.id].sort().join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      links.push({ source: a.id, target: n.id, score: Math.round(n.score * 100) / 100 });
+    }
+  }
+  return {
+    docs: docs.map((d) => ({ id: d.id, name: d.name, kb_id: d.kb_id, kb: kbs.get(d.kb_id) ?? "", tags: d.tags, chunks: d.chunks, chars: d.chars })),
+    tags: tagCounts(kbIds),
+    links,
+  };
+}
+
+/** Ask the default model for 1–3 tags, reusing the existing vocabulary when it fits. */
+export async function suggestTags(docId: string): Promise<string[]> {
+  const doc = db().prepare("SELECT name FROM kb_docs WHERE id = ?").get(docId) as { name: string } | undefined;
+  if (!doc) throw new Error("Document introuvable");
+  const sample = (db().prepare("SELECT text FROM kb_chunks WHERE doc_id = ? ORDER BY idx LIMIT 3").all(docId) as { text: string }[]).map((r) => r.text).join("\n\n").slice(0, 2500);
+  const vocabulary = tagCounts().map((t) => t.tag);
+  const raw = await complete({
+    json: true,
+    temperature: 0.2,
+    source: "tags",
+    messages: [
+      {
+        role: "system",
+        content: `Tu classes des documents par thématique. Réponds UNIQUEMENT en JSON : {"tags": ["tag1", "tag2"]}. 1 à 3 tags courts (un ou deux mots, en minuscules).${
+          vocabulary.length ? ` Réutilise de préférence ces tags existants quand ils conviennent : ${vocabulary.join(", ")}.` : ""
+        }`,
+      },
+      { role: "user", content: `Document « ${doc.name} » :\n${sample}` },
+    ],
+  });
+  const m = raw.match(/\{[\s\S]*\}/);
+  const tags = m ? normTags((JSON.parse(m[0]) as { tags?: unknown }).tags).slice(0, 3) : [];
+  if (!tags.length) throw new Error("Aucun tag proposé, réessaie");
+  return tags;
 }

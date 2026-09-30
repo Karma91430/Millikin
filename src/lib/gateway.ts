@@ -268,7 +268,11 @@ export async function embed(texts: string[], ref?: string | null): Promise<numbe
         headers: ollamaHeaders(res.provider),
         body: JSON.stringify({ model: res.model, input: texts.slice(i, i + 32), keep_alive: "10m" }),
       });
-      if (!r.ok) throw new Error(`Embeddings ${r.status} (${res.model}) : ${(await r.text()).slice(0, 300)}`);
+      if (!r.ok) {
+        const body = (await r.text()).slice(0, 300);
+        if (r.status === 404 && /not found/i.test(body)) throw new Error(`Le modèle d'embedding « ${res.model} » n'est pas installé sur Ollama : installe-le (onglet Modèles) ou choisis-en un autre dans Réglages.`);
+        throw new Error(`Embeddings ${r.status} (${res.model}) : ${body}`);
+      }
       const j = (await r.json()) as { embeddings: number[][]; prompt_eval_count?: number };
       tokens += j.prompt_eval_count ?? 0;
       out.push(...j.embeddings);

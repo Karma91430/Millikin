@@ -3,7 +3,7 @@
 import { Bot, BookmarkPlus, Copy, MessageSquare, Pencil, Plus, Sparkles, Trash2, TriangleAlert, UserPlus, Wand2, Wrench } from "lucide-react";
 import { recommendedTools } from "@/lib/profiles";
 import { useState } from "react";
-import { api, crud, useData, type Agent, type Kb, type McpServer, type Meta, type Profile, type Skill } from "../api";
+import { api, crud, useData, type Agent, type Meta, type Profile, type Skill } from "../api";
 import { ProfileGrid, ProfilePicker, type ProfilesData } from "../ProfilePicker";
 import { Avatar, Badge, Button, Card, cx, Drawer, Empty, ErrorNote, Field, Input, PageHeader, Pick, Select, Textarea } from "../ui";
 
@@ -45,7 +45,7 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
     <div>
       <PageHeader
         title="Agents"
-        subtitle="Des profils spécialisés : prompt, modèle local, outils, skills, connaissances et serveurs MCP."
+        subtitle="Des profils spécialisés : prompt, modèle local, outils et skills. Connaissances et MCP se donnent par projet."
         actions={
           <>
             <div className="flex rounded-lg border border-line p-0.5">
@@ -105,8 +105,6 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
                     </Badge>
                   ))}
                   {a.skill_ids.length > 0 && <Badge color="#8b5cf6">{a.skill_ids.length} skill(s)</Badge>}
-                  {a.kb_ids.length > 0 && <Badge color="#06b6d4">RAG</Badge>}
-                  {a.mcp_ids.length > 0 && <Badge color="#10b981">{a.mcp_ids.length} MCP</Badge>}
                 </div>
               </Card>
             ))}
@@ -435,8 +433,6 @@ function AgentEditor({ initial, meta, onClose, onSaved }: { initial: Partial<Age
   const [error, setError] = useState<string>();
   const [profileSaved, setProfileSaved] = useState(false);
   const skills = useData<Skill[]>("/api/crud/skills");
-  const kbs = useData<Kb[]>("/api/crud/kbs");
-  const mcp = useData<McpServer[]>("/api/crud/mcp");
   const set = <K extends keyof Agent>(k: K, v: Agent[K]) => setA((x) => ({ ...x, [k]: v }));
   const health = useData<Health>("/api/tools/health");
   const recommended = recommendedTools(a.name ?? "", a.role ?? "");
@@ -609,18 +605,9 @@ function AgentEditor({ initial, meta, onClose, onSaved }: { initial: Partial<Age
         <Field label="Skills">
           <Pick items={skills.data ?? []} value={a.skill_ids ?? []} onChange={(v) => set("skill_ids", v)} render={(s) => s.name} empty="Aucun skill : crée-en dans l'onglet Skills." />
         </Field>
-        <Field label="Bases de connaissances (RAG)">
-          <Pick items={kbs.data ?? []} value={a.kb_ids ?? []} onChange={(v) => set("kb_ids", v)} render={(k) => `📚 ${k.name}`} empty="Aucune base : crée-en dans l'onglet Connaissances." />
-        </Field>
-        <Field label="Serveurs MCP">
-          <Pick
-            items={mcp.data ?? []}
-            value={a.mcp_ids ?? []}
-            onChange={(v) => set("mcp_ids", v)}
-            render={(m) => `🔌 ${m.name}${m.enabled ? "" : " (désactivé)"}`}
-            empty="Aucun serveur : ajoute-en dans l'onglet MCP."
-          />
-        </Field>
+        <p className="rounded-lg border border-line bg-surface-1 px-3 py-2 text-xs text-fg-muted">
+          📚 Connaissances et 🔌 serveurs MCP se donnent par projet : onglet <b>Équipe</b> du projet → Ressources, agent par agent.
+        </p>
       </div>
     </Drawer>
   );

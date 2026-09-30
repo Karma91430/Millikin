@@ -7,6 +7,19 @@ const PAGE_CHARS = 12000;
 
 export type SearchResult = { title: string; url: string; snippet: string };
 
+// Short-lived cache: agents of a team often repeat the same searches and page reads within a run.
+const TTL = 10 * 60_000;
+const gc = globalThis as unknown as { __millikinWebCache?: Map<string, { at: number; value: string }> };
+const cache = (gc.__millikinWebCache ??= new Map());
+async function cached(key: string, fn: () => Promise<string>): Promise<string> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < TTL) return hit.value;
+  const value = await fn();
+  cache.set(key, { at: Date.now(), value });
+  if (cache.size > 200) cache.delete(cache.keys().next().value!);
+  return value;
+}
+
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", eacute: "é", egrave: "è", agrave: "à", ccedil: "ç", rsquo: "’", lsquo: "‘", ldquo: "“", rdquo: "”", hellip: "…", mdash: "—", ndash: "–" };
 export function decodeEntities(s: string) {
   return s
@@ -85,6 +98,10 @@ async function duckduckgo(query: string, n: number): Promise<SearchResult[]> {
 
 export async function webSearch(query: string, n = 6): Promise<string> {
   if (!query.trim()) throw new Error("Requête vide");
+  return cached(`search:${n}:${query.trim().toLowerCase()}`, () => searchUncached(query, n));
+}
+
+async function searchUncached(query: string, n: number): Promise<string> {
   const s = getSettings();
   let results: SearchResult[] = [];
   let source = "SearXNG";
@@ -129,6 +146,10 @@ export function htmlToText(html: string): { title: string; text: string } {
 
 export async function fetchUrl(url: string): Promise<string> {
   assertHttp(url);
+  return cached(`url:${url}`, () => fetchUncached(url));
+}
+
+async function fetchUncached(url: string): Promise<string> {
   let r: Response;
   try {
     r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(20000), headers: { "user-agent": UA, accept: "text/html,application/json,text/plain,*/*;q=0.8" } });
