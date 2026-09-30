@@ -173,6 +173,7 @@ export function App() {
                 createFrom={createFrom}
                 onCreateHandled={() => setCreateFrom(null)}
                 onRunsChanged={pollRuns}
+                onPlanChat={(id) => chatWith({ type: "project", id, planning: true })}
               />
             )}
             {view === "agents" && m && <AgentsView agents={a} meta={m} onChange={refreshAll} onChat={(id) => chatWith({ type: "agent", id })} />}

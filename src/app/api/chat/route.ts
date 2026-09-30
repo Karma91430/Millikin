@@ -1,6 +1,7 @@
 import { db, get, newId, now, type Agent, type Project } from "@/lib/db";
 import type { ChatMessage } from "@/lib/gateway";
-import { runAgent, teamRuntime, type Phase, type TeamRuntime } from "@/lib/orchestrator";
+import { PLANNING_SCOPING, runAgent, teamRuntime, type Phase, type TeamRuntime } from "@/lib/orchestrator";
+import { planProject } from "@/lib/planner";
 import { appendDecision } from "@/lib/decisions";
 import { activeRunFor, startRun, streamRun } from "@/lib/runs";
 import { workspaceFor } from "@/lib/tools";
@@ -10,8 +11,10 @@ type Body = {
   targetType: "project" | "agent";
   targetId: string;
   message: string;
-  /** User validated the scoping: switch the conversation to execution. */
+  /** User validated the scoping: switch the conversation to execution (or create the tasks, for planning). */
   approve?: boolean;
+  /** Only for a new conversation: "planning" = scoping discussion that ends with the project breakdown. */
+  kind?: "planning";
 };
 
 /** Start a chat turn as a background run and stream it. Closing the stream does not stop the run. */
@@ -37,21 +40,29 @@ export async function POST(req: Request) {
   // ---- conversation + phase
   let conversationId: string = body.conversationId ?? "";
   let phase: Phase = "free";
+  let kind = "";
   const title = body.message.trim().slice(0, 70);
-  const existing = conversationId ? (d.prepare("SELECT phase FROM conversations WHERE id = ?").get(conversationId) as { phase: string } | undefined) : undefined;
+  const existing = conversationId ? (d.prepare("SELECT phase, kind FROM conversations WHERE id = ?").get(conversationId) as { phase: string; kind: string } | undefined) : undefined;
   if (!existing) {
     conversationId = newId();
-    phase = team?.spec.clarify ? "cadrage" : "free";
-    d.prepare("INSERT INTO conversations (id, target_type, target_id, title, phase, created_at, updated_at) VALUES (?,?,?,?,?,?,?)").run(
+    kind = body.kind === "planning" && project ? "planning" : "";
+    // Planning conversations always start with a scoping discussion.
+    phase = kind === "planning" || team?.spec.clarify ? "cadrage" : "free";
+    d.prepare("INSERT INTO conversations (id, target_type, target_id, title, phase, kind, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)").run(
       conversationId,
       body.targetType,
       body.targetId,
-      title,
+      kind === "planning" ? `🗂️ Cadrage : ${title}` : title,
       phase,
+      kind,
       now(),
       now(),
     );
-  } else phase = (existing.phase as Phase) || "free";
+  } else {
+    phase = (existing.phase as Phase) || "free";
+    kind = existing.kind || "";
+  }
+  const planningNow = kind === "planning" && !!body.approve && phase === "cadrage";
   if (body.approve && phase === "cadrage") {
     phase = "execution";
     d.prepare("UPDATE conversations SET phase = ? WHERE id = ?").run(phase, conversationId);
@@ -100,7 +111,29 @@ export async function POST(req: Request) {
     async (emit, signal) => {
       let content = "";
       try {
-        content = await runAgent({ agent: lead, input: body.message, history, team, phase, emit, signal, ctx });
+        if (planningNow && project) {
+          // Validated scoping: the whole discussion becomes the brief for the breakdown.
+          const transcript = [...history, { role: "user", content: body.message }]
+            .map((m) => `${m.role === "user" ? "Utilisateur" : lead.name} : ${m.content}`)
+            .join("\n\n")
+            .slice(-8000);
+          const r = await planProject({ project: get<Project>("projects", project.id) ?? project, brief: transcript, sprints: true, emit, signal });
+          content =
+            `✅ Planification créée par ${r.credit} : **${r.tasks.length} tâche(s)**${r.sprints ? ` réparties en **${r.sprints} sprint(s)**` : ""}.\n\n` +
+            r.tasks.map((t) => `- ${t.title}${t.complexity ? ` (${t.complexity} pts)` : ""}`).join("\n") +
+            `\n\nRetrouve-les dans **Projets → Tâches** : tu peux les ajuster, puis lancer la chaîne ou un sprint.`;
+        } else
+          content = await runAgent({
+            agent: lead,
+            input: body.message,
+            history,
+            team,
+            phase,
+            emit,
+            signal,
+            ctx,
+            scopingNote: kind === "planning" ? PLANNING_SCOPING : undefined,
+          });
       } catch (e) {
         const message = signal.aborted ? "Arrêté" : e instanceof Error ? e.message : String(e);
         content = `⚠️ ${message}`;
