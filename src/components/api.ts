@@ -68,6 +68,7 @@ export type Task = {
   result: string;
   evaluation: Evaluation | null;
   trace: Trace | null;
+  depends_on: string[];
   title: string;
   description: string;
   status: "todo" | "doing" | "review" | "done";

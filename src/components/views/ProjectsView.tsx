@@ -10,13 +10,16 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Link2,
   Loader2,
+  Lock,
   MessageSquare,
   Pencil,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Square,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -389,7 +392,7 @@ function ProjectDetail({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "overview" && <Overview tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} />}
+        {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} />}
         {tab === "tasks" && <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
         {tab === "team" && <ProjectTeam project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
@@ -437,7 +440,23 @@ function ProjectTeam({ project, agents, onSaved, onAgentsChange }: { project: Pr
   );
 }
 
-function Overview({ tasks, byId, ws, onTab, onFile }: { tasks: Task[]; byId: Map<string, Agent>; ws?: Workspace; onTab: (t: Tab) => void; onFile: (p: string) => void }) {
+function Overview({
+  projectId,
+  tasks,
+  byId,
+  ws,
+  onTab,
+  onFile,
+}: {
+  projectId: string;
+  tasks: Task[];
+  byId: Map<string, Agent>;
+  ws?: Workspace;
+  onTab: (t: Tab) => void;
+  onFile: (p: string) => void;
+}) {
+  const hasLog = ws?.entries.some((e) => e.path === "docs/DECISIONS.md");
+  const log = useData<{ content: string }>(hasLog ? `/api/workspace?projectId=${projectId}&file=${encodeURIComponent("docs/DECISIONS.md")}` : null);
   const done = tasks.filter((t) => t.status === "done").length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const recentTasks = [...tasks].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0)).slice(0, 6);
@@ -508,6 +527,25 @@ function Overview({ tasks, byId, ws, onTab, onFile }: { tasks: Task[]; byId: Map
         ))}
         {!recentFiles.length && <div className="px-4 py-4 text-sm text-fg-subtle">Aucun fichier pour l&apos;instant.</div>}
       </Card>
+      <Card className="lg:col-span-2">
+        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+          <span className="text-sm font-semibold">Journal des décisions</span>
+          {hasLog && (
+            <button onClick={() => onFile("docs/DECISIONS.md")} className="font-mono text-xs text-accent hover:underline">
+              docs/DECISIONS.md
+            </button>
+          )}
+        </div>
+        <div className="max-h-80 overflow-y-auto px-4 py-3">
+          {log.data?.content ? (
+            <Markdown>{log.data.content.replace(/^# Journal des décisions\n+/, "")}</Markdown>
+          ) : (
+            <div className="text-sm text-fg-subtle">
+              Vide pour l&apos;instant. Il se remplit quand tu valides un cadrage, quand une tâche est contrôlée, et quand les premiers contacts consignent une décision. Chaque agent du projet le reçoit.
+            </div>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -543,9 +581,22 @@ function Board({
   const [drag, setDrag] = useState<string | null>(null);
   const [local, setLocal] = useState<Record<string, Task["status"]>>({});
   const [error, setError] = useState<string>();
+  const [retry, setRetry] = useState(true);
   const byId = allAgents;
   const running = new Set(runs.filter((r) => r.status === "running" && r.conversationId.startsWith("task:")).map((r) => r.conversationId.slice(5)));
+  const chain = runs.find((r) => r.status === "running" && r.conversationId === `chain:${project.id}`);
   const statusOf = (t: Task) => local[t.id] ?? t.status;
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const blockers = (t: Task) => (t.depends_on ?? []).map((id) => taskById.get(id)).filter((d): d is Task => !!d && d.status !== "done");
+  const launchChain = async () => {
+    setError(undefined);
+    try {
+      await api("/api/tasks/chain", { method: "POST", json: { projectId: project.id, retry } });
+      onRunsChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const move = async (id: string, status: Task["status"]) => {
     setLocal((l) => ({ ...l, [id]: status }));
@@ -574,7 +625,27 @@ function Board({
         <Button variant="primary" size="sm" onClick={() => setEdit({ project_id: project.id, title: "", description: "", status: "todo", priority: "normal", assignee_id: "", notes: [] })}>
           <Plus size={14} /> Tâche
         </Button>
-        <span className="text-xs text-fg-subtle">▶ lance la tâche : l&apos;agent assigné la réalise, puis un premier contact la contrôle et met à jour le statut.</span>
+        {chain ? (
+          <>
+            <span className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs text-accent">
+              <Loader2 size={12} className="animate-spin" /> Chaîne en cours
+            </span>
+            <Button size="sm" variant="danger" onClick={async () => (await api("/api/runs/stop", { method: "POST", json: { id: chain.id } }), onRunsChanged())}>
+              <Square size={12} /> Arrêter
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="soft" onClick={launchChain} title="Exécute toutes les tâches ouvertes dans l'ordre des dépendances">
+              <Link2 size={13} /> Lancer la chaîne
+            </Button>
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Si le contrôle renvoie « à corriger », la tâche est relancée une fois avec le retour avant d'arrêter la chaîne">
+              <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} className="accent-[var(--accent)]" />
+              relancer une fois si « à corriger »
+            </label>
+          </>
+        )}
+        <span className="text-xs text-fg-subtle">▶ lance une tâche · 🔒 bloquée tant que ses dépendances ne sont pas terminées</span>
       </div>
       {error && (
         <div className="px-6 pt-2">
@@ -595,6 +666,7 @@ function Board({
                 {items.map((t) => {
                   const who = byId.get(t.assignee_id);
                   const isRunning = running.has(t.id);
+                  const blockedBy = blockers(t);
                   const phaseLabel = isRunning ? (t.status === "review" ? "contrôle en cours…" : `${who?.name ?? "l'agent"} travaille…`) : null;
                   return (
                     <div
@@ -607,7 +679,12 @@ function Board({
                     >
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1 text-sm font-medium leading-snug">{t.title}</div>
-                        {!isRunning && t.status !== "done" && (
+                        {!isRunning && t.status !== "done" && blockedBy.length > 0 && (
+                          <span title={`Bloquée par : ${blockedBy.map((b) => b.title).join(", ")}`} className="flex h-6 w-6 shrink-0 items-center justify-center text-fg-subtle">
+                            <Lock size={12} />
+                          </span>
+                        )}
+                        {!isRunning && t.status !== "done" && !blockedBy.length && (
                           <button
                             onClick={(e) => (e.stopPropagation(), launch(t))}
                             title={who ? `Lancer : ${who.name} réalise la tâche` : "Assigne d'abord la tâche à un agent"}
@@ -624,6 +701,18 @@ function Board({
                       {phaseLabel && <div className="mt-1 text-[11px] text-accent">{phaseLabel}</div>}
                       {!phaseLabel && t.description && <div className="mt-1 line-clamp-2 text-xs text-fg-muted">{t.description}</div>}
                       {t.evaluation && !isRunning && <div className="mt-1.5 line-clamp-2 text-[11px] text-fg-muted">💬 {t.evaluation.comment}</div>}
+                      {t.depends_on?.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {t.depends_on.map((id) => {
+                            const d = taskById.get(id);
+                            return d ? (
+                              <span key={id} title={d.title} className={cx("rounded px-1 text-[10px]", d.status === "done" ? "bg-emerald-500/15 text-emerald-400" : "bg-surface-3 text-fg-muted")}>
+                                ⛓ {d.title.length > 22 ? d.title.slice(0, 22) + "…" : d.title}
+                              </span>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
                       <div className="mt-2 flex items-center gap-1.5">
                         {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
                         {t.evaluation && <EvalBadge e={t.evaluation} />}
@@ -644,6 +733,7 @@ function Board({
           key={edit.id ?? "new"}
           initial={edit}
           live={tasks.find((t) => t.id === edit.id)}
+          projectTasks={tasks}
           agents={agents}
           byId={byId}
           running={!!edit.id && running.has(edit.id)}
@@ -659,6 +749,7 @@ function Board({
 function TaskEditor({
   initial,
   live,
+  projectTasks,
   agents,
   byId,
   running,
@@ -668,6 +759,7 @@ function TaskEditor({
 }: {
   initial: Partial<Task>;
   live?: Task;
+  projectTasks: Task[];
   agents: Agent[];
   byId: Map<string, Agent>;
   running: boolean;
@@ -685,7 +777,7 @@ function TaskEditor({
   const roots = trace ? trace.order.map((id) => trace.calls[id]).filter((c) => c && !c.parentCallId) : [];
   const save = async () => {
     // Agent-maintained fields are never overwritten from the dialog.
-    const editable = { id: t.id, title: t.title, description: t.description, priority: t.priority, assignee_id: t.assignee_id };
+    const editable = { id: t.id, title: t.title, description: t.description, priority: t.priority, assignee_id: t.assignee_id, depends_on: t.depends_on ?? [] };
     await crud.save("tasks", t.id ? editable : t);
     onSaved();
   };
@@ -783,6 +875,10 @@ function TaskEditor({
             </Field>
           </div>
 
+          <Field label="Dépend de" hint="La tâche reste bloquée tant que celles-ci ne sont pas terminées ; leur compte rendu est transmis à l'agent au lancement.">
+            <DependencyPick task={t} tasks={projectTasks} value={t.depends_on ?? []} onChange={(v) => set("depends_on", v)} />
+          </Field>
+
           {cur.evaluation && (
             <div className={cx("rounded-lg border p-3", cur.evaluation.verdict === "valide" ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5")}>
               <div className="mb-1 flex items-center gap-2 text-sm font-medium">
@@ -836,6 +932,43 @@ function TaskEditor({
       </Modal>
       {focus && trace && <CallFocus trace={trace} callId={focus} agents={byId} onClose={() => setFocus(null)} onFocus={setFocus} />}
     </>
+  );
+}
+
+/** Pick dependencies among the project's tasks, excluding the task itself and anything that depends on it. */
+function DependencyPick({ task, tasks, value, onChange }: { task: Partial<Task>; tasks: Task[]; value: string[]; onChange: (v: string[]) => void }) {
+  const dependents = new Set<string>();
+  if (task.id) {
+    const stack = [task.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const t of tasks)
+        if (t.depends_on?.includes(id) && !dependents.has(t.id)) {
+          dependents.add(t.id);
+          stack.push(t.id);
+        }
+    }
+  }
+  const options = tasks.filter((t) => t.id !== task.id && !dependents.has(t.id));
+  if (!options.length) return <div className="text-xs text-fg-subtle">Aucune autre tâche disponible.</div>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const on = value.includes(o.id);
+        const col = COLUMNS.find((c) => c.id === o.status)!;
+        return (
+          <button
+            type="button"
+            key={o.id}
+            onClick={() => onChange(on ? value.filter((v) => v !== o.id) : [...value, o.id])}
+            className={cx("inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs", on ? "border-accent bg-accent/15 text-fg" : "border-line bg-surface-1 text-fg-muted hover:border-line-strong")}
+          >
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: col.color }} />
+            {o.title}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

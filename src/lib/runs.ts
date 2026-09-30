@@ -17,15 +17,17 @@ export type Run = {
   trace: Trace;
   controller: AbortController;
   listeners: Set<(ev: TraceEvent) => void>;
+  /** Resolves when the run has emitted "done". */
+  finished: Promise<void>;
 };
 
-export type RunInfo = Omit<Run, "trace" | "controller" | "listeners">;
+export type RunInfo = Omit<Run, "trace" | "controller" | "listeners" | "finished">;
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const g = globalThis as unknown as { __millikinRuns?: Map<string, Run> };
 const runs = (g.__millikinRuns ??= new Map());
 
-export const info = ({ trace: _t, controller: _c, listeners: _l, ...rest }: Run): RunInfo => (void _t, void _c, void _l, rest);
+export const info = ({ trace: _t, controller: _c, listeners: _l, finished: _f, ...rest }: Run): RunInfo => (void _t, void _c, void _l, void _f, rest);
 
 export function listRuns(): RunInfo[] {
   const now = Date.now();
@@ -41,7 +43,9 @@ export function startRun(
   meta: Pick<Run, "id" | "conversationId" | "targetType" | "targetId" | "title" | "userMessage">,
   exec: (emit: (ev: TraceEvent) => void, signal: AbortSignal, run: Run) => Promise<void>,
 ): Run {
-  const run: Run = { ...meta, startedAt: Date.now(), status: "running", trace: emptyTrace(), controller: new AbortController(), listeners: new Set() };
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((r) => (resolveFinished = r));
+  const run: Run = { ...meta, startedAt: Date.now(), status: "running", trace: emptyTrace(), controller: new AbortController(), listeners: new Set(), finished };
   runs.set(run.id, run);
   const emit = (ev: TraceEvent) => {
     if (ev.type !== "conversation" && ev.type !== "done" && ev.type !== "snapshot") run.trace = applyEvent(run.trace, ev);
@@ -50,6 +54,7 @@ export function startRun(
       if (run.status === "running") run.status = run.trace.error ? "error" : "done";
     }
     for (const l of run.listeners) l(ev);
+    if (ev.type === "done") resolveFinished();
   };
   exec(emit, run.controller.signal, run).catch((e) => {
     run.status = "error";

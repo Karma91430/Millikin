@@ -76,6 +76,7 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "result", "TEXT DEFAULT ''"],
   ["tasks", "evaluation", "TEXT DEFAULT 'null'"],
   ["tasks", "trace", "TEXT DEFAULT 'null'"],
+  ["tasks", "depends_on", "TEXT DEFAULT '[]'"],
 ];
 
 const slugify = (s: string) =>
@@ -203,9 +204,9 @@ export const ENTITIES: Record<string, EntityDef> = {
   projects: { table: "projects", json: ["team"], bool: [], cols: ["name", "description", "path", "template_id", "team"], order: "updated_at DESC" },
   tasks: {
     table: "tasks",
-    json: ["notes", "evaluation", "trace"],
+    json: ["notes", "evaluation", "trace", "depends_on"],
     bool: [],
-    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace"],
+    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on"],
     order: "created_at",
   },
   profiles: {
@@ -333,6 +334,8 @@ export type Task = {
   result: string;
   evaluation: Evaluation | null;
   trace: unknown;
+  /** Ids of tasks that must be done first. */
+  depends_on: string[];
   title: string;
   description: string;
   status: "todo" | "doing" | "review" | "done";

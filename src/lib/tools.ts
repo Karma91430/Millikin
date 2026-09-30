@@ -99,8 +99,24 @@ const byName = (team: Agent[], name: unknown) => {
 };
 const fmtTask = (t: Task, team: Agent[]) => {
   const who = team.find((a) => a.id === t.assignee_id);
-  return `#${t.id} [${t.status}] ${t.title}${who ? ` → ${who.name}` : ""}${t.priority !== "normal" ? ` (priorité ${t.priority})` : ""}`;
+  const deps = t.depends_on?.length ? ` (dépend de ${t.depends_on.map((d) => `#${d}`).join(", ")})` : "";
+  return `#${t.id} [${t.status}] ${t.title}${who ? ` → ${who.name}` : ""}${t.priority !== "normal" ? ` (priorité ${t.priority})` : ""}${deps}`;
 };
+
+/** Resolve card references given by a model: ids (with or without #) or titles. */
+function resolveCards(refs: unknown, projectId: string): string[] {
+  const list0 = Array.isArray(refs) ? refs : typeof refs === "string" ? refs.split(",") : [];
+  const mine = list<Task>("tasks").filter((x) => x.project_id === projectId);
+  const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return [
+    ...new Set(
+      list0
+        .map((r) => String(r).replace(/^#/, "").trim())
+        .map((r) => mine.find((x) => x.id === r)?.id ?? mine.find((x) => norm(x.title) === norm(r))?.id ?? mine.find((x) => norm(x.title).includes(norm(r)) && r.length > 3)?.id)
+        .filter((x): x is string => !!x),
+    ),
+  ];
+}
 const STATUSES = ["todo", "doing", "review", "done"];
 
 export const TOOL_GROUPS: Group[] = [
@@ -207,6 +223,7 @@ export const TOOL_GROUPS: Group[] = [
             description: str("détails, critères d'acceptation"),
             owner: str(`responsable affiché sur la carte (${ctx.team.map((m) => m.name).join(", ")})`),
             priority: { type: "string", enum: ["low", "normal", "high"] },
+            depends_on: { type: "array", items: { type: "string" }, description: "cartes à terminer avant celle-ci (identifiants ou titres)" },
           },
           ["title"],
         ),
@@ -220,6 +237,7 @@ export const TOOL_GROUPS: Group[] = [
             assignee_id: byName(ctx.team, a.owner ?? a.assignee)?.id ?? "",
             created_by: ctx.agent.id,
             notes: [],
+            depends_on: resolveCards(a.depends_on, ctx.projectId),
           });
           return `Tâche créée : ${fmtTask(t, ctx.team)}`;
         },

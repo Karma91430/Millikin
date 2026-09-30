@@ -1,6 +1,7 @@
 import { db, get, newId, now, type Agent, type Project } from "@/lib/db";
 import type { ChatMessage } from "@/lib/gateway";
 import { runAgent, teamRuntime, type Phase, type TeamRuntime } from "@/lib/orchestrator";
+import { appendDecision } from "@/lib/decisions";
 import { activeRunFor, startRun, streamRun } from "@/lib/runs";
 import { workspaceFor } from "@/lib/tools";
 
@@ -60,6 +61,18 @@ export async function POST(req: Request) {
     ? { workspace: await workspaceFor(project.name, project.path), projectId: project.id, team: team!.spec.agent_ids.map((id) => team!.agents.get(id)!).filter(Boolean) }
     : { workspace: await workspaceFor(null), projectId: "", team: [speaker] };
   if (project) d.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now(), project.id);
+  // Validated scoping becomes the first entry of the project's decision log.
+  if (project && body.approve) {
+    const scoping = d.prepare("SELECT content FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1").get(conversationId) as
+      | { content: string }
+      | undefined;
+    await appendDecision(
+      ctx.workspace,
+      "Cadrage validé",
+      `**Validation de l'utilisateur :** ${body.message}\n\n**Cadrage retenu :**\n${(scoping?.content ?? "").slice(0, 3000)}`,
+      "Utilisateur",
+    ).catch(() => {});
+  }
 
   // Only the user ↔ speaker exchange is replayed as history; delegations stay in the trace.
   const history = (
