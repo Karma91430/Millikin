@@ -74,6 +74,8 @@ export type RunParams = {
   extra?: string[];
   /** Consulted co-lead: gives an opinion only, never delegates. */
   consultOnly?: boolean;
+  /** Tools withheld for this run and its delegations (e.g. board edits during a task review). */
+  excludeTools?: string[];
   emit: Emit;
   signal?: AbortSignal;
   /** Workspace + project shared by every agent of the run (files, commands, tasks). */
@@ -177,11 +179,13 @@ export async function runAgent(p: RunParams): Promise<string> {
       };
     }
 
+    const excluded = new Set(p.excludeTools ?? []);
     for (const [def, impl] of buildTools({ ...p.ctx, agent })) {
+      if (excluded.has(def.function.name)) continue;
       tools.push(def);
       impls[def.function.name] = impl;
     }
-    if (agent.tools?.includes("files_write")) sys.push(FILE_RULES);
+    if (agent.tools?.includes("files_write") && !excluded.has("write_file")) sys.push(FILE_RULES);
     else if (agent.tools?.some((t) => t.startsWith("files_") || t === "run_command"))
       sys.push("## Dossier de travail\nTes outils fichiers et commandes agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour t'orienter.");
 

@@ -66,6 +66,8 @@ const openIn = (projectId: string, app: "finder" | "vscode", file?: string) => a
 export function ProjectsView({
   agents,
   teams,
+  projects,
+  reloadProjects,
   runs,
   onChat,
   onAgentsChange,
@@ -77,6 +79,9 @@ export function ProjectsView({
 }: {
   agents: Agent[];
   teams: Team[];
+  /** Owned by the app so the workspace sees team edits immediately. */
+  projects?: Project[];
+  reloadProjects: () => void;
   runs: RunInfo[];
   onChat: (projectId: string) => void;
   onAgentsChange: () => void;
@@ -87,10 +92,9 @@ export function ProjectsView({
   onCreateHandled: () => void;
   onRunsChanged: () => void;
 }) {
-  const projects = useData<Project[]>("/api/crud/projects");
   const tasks = useData<Task[]>("/api/crud/tasks");
   const [creating, setCreating] = useState(false);
-  const list = projects.data ?? [];
+  const list = projects ?? [];
   const project = list.find((p) => p.id === selected) ?? list[0];
 
   // Agents update the board during runs: keep it fresh.
@@ -135,7 +139,7 @@ export function ProjectsView({
               </button>
             );
           })}
-          {!list.length && projects.data && (
+          {!list.length && projects && (
             <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
               Aucun projet. Crée le premier à partir d&apos;un modèle d&apos;équipe.
             </button>
@@ -152,10 +156,10 @@ export function ProjectsView({
           reloadTasks={tasks.reload}
           runs={runs}
           onChat={() => onChat(project.id)}
-          reloadProjects={projects.reload}
+          reloadProjects={reloadProjects}
           onAgentsChange={onAgentsChange}
           onRunsChanged={onRunsChanged}
-          onDeleted={() => (onSelect(null), projects.reload())}
+          onDeleted={() => (onSelect(null), reloadProjects())}
         />
       ) : (
         <Empty title="Aucun projet">Un projet a son propre dossier, son tableau de tâches et une équipe copiée depuis un modèle.</Empty>
@@ -169,7 +173,7 @@ export function ProjectsView({
           onCreated={(p) => {
             setCreating(false);
             onCreateHandled();
-            projects.reload();
+            reloadProjects();
             onSelect(p.id);
           }}
         />

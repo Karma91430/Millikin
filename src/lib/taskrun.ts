@@ -4,6 +4,8 @@ import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, startRun, type Run } from "./runs";
 import { workspaceFor } from "./tools";
 
+const BOARD_WRITE = ["board_add_card", "board_update_card"];
+
 const note = (t: Task, by: string, text: string) => [...(t.notes ?? []), { at: now(), by, text }];
 
 /** Pull the reviewer's verdict from its answer (a trailing JSON object), with a keyword fallback. */
@@ -49,7 +51,8 @@ Réalise cette tâche maintenant. Si elle implique du code ou des documents, éc
 Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifiés (chemins), et les points d'attention.`;
 
       try {
-        const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, emit, signal, ctx });
+        // The board is driven by the task run itself: the assignee must not add or move cards.
+        const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, emit, signal, ctx, excludeTools: BOARD_WRITE });
         t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
         if (reviewer) {
@@ -57,6 +60,8 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
             agent: reviewer,
             depth: 1,
             consultOnly: true,
+            // Review is read-only: no card creation, no file edits, no commands.
+            excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command"],
             phase: "execution",
             team,
             emit,
