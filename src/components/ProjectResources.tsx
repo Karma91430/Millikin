@@ -111,6 +111,21 @@ export function ProjectResourcesPanel({ project, agents, onSaved }: { project: P
                   </Select>
                 </Field>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Recherche hybride">
+                  <Select value={res.rag.hybrid ? "on" : "off"} onChange={(e) => setRag({ hybrid: e.target.value === "on" })}>
+                    <option value="on">Sens + mots-clés (recommandé)</option>
+                    <option value="off">Sens uniquement</option>
+                  </Select>
+                </Field>
+                <Field label="Reranking">
+                  <Select value={res.rag.rerank} onChange={(e) => setRag({ rerank: e.target.value as ProjectResources["rag"]["rerank"] })}>
+                    <option value="none">Aucun (le plus rapide)</option>
+                    <option value="mmr">MMR (varier les sources)</option>
+                    <option value="llm">LLM (plus pertinent, plus lent)</option>
+                  </Select>
+                </Field>
+              </div>
               <p className="text-[11px] text-fg-subtle">
                 « Injectés » : les meilleurs passages sont ajoutés avant chaque réponse (plus complet, plus lent). « À la demande » : l&apos;agent appelle search_knowledge seulement quand il en a besoin.
               </p>

@@ -2,8 +2,9 @@
 
 import { Bot, BookmarkPlus, Copy, MessageSquare, Pencil, Plus, Sparkles, Trash2, TriangleAlert, UserPlus, Wand2, Wrench } from "lucide-react";
 import { recommendedTools } from "@/lib/profiles";
+import { normalizeAgentRag, type AgentRag } from "@/lib/resources";
 import { useState } from "react";
-import { api, crud, useData, type Agent, type Meta, type Profile, type Skill } from "../api";
+import { api, crud, useData, type Agent, type Kb, type Meta, type Profile, type Skill } from "../api";
 import { ProfileGrid, ProfilePicker, type ProfilesData } from "../ProfilePicker";
 import { Avatar, Badge, Button, Card, cx, Drawer, Empty, ErrorNote, Field, Input, PageHeader, Pick, Select, Textarea } from "../ui";
 
@@ -45,7 +46,7 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
     <div>
       <PageHeader
         title="Agents"
-        subtitle="Des profils spécialisés : prompt, modèle local, outils et skills. Connaissances et MCP se donnent par projet."
+        subtitle="Des profils spécialisés : prompt, modèle local, outils, skills et connaissances. Les serveurs MCP se donnent par projet."
         actions={
           <>
             <div className="flex rounded-lg border border-line p-0.5">
@@ -105,6 +106,7 @@ export function AgentsView({ agents, meta, onChange, onChat }: { agents: Agent[]
                     </Badge>
                   ))}
                   {a.skill_ids.length > 0 && <Badge color="#8b5cf6">{a.skill_ids.length} skill(s)</Badge>}
+                  {a.kb_ids?.length > 0 && <Badge color="#06b6d4">📚 {a.kb_ids.length} base(s)</Badge>}
                 </div>
               </Card>
             ))}
@@ -204,6 +206,47 @@ function BulkTools({ agents, meta, onClose, onSaved }: { agents: Agent[]; meta: 
         ))}
       </div>
     </Drawer>
+  );
+}
+
+/** The agent's own knowledge: bases, tag filter and how it uses them (applies in direct chats and in projects). */
+function AgentKnowledge({ value, onChange }: { value: Partial<Agent>; onChange: (patch: Partial<Agent>) => void }) {
+  const kbs = useData<Kb[]>("/api/crud/kbs");
+  const ids = value.kb_ids ?? [];
+  const rag = normalizeAgentRag(value.rag);
+  const tags = useData<{ tag: string; count: number }[]>(ids.length ? `/api/kb/tags?kbIds=${ids.join(",")}` : null);
+  const setRag = (patch: Partial<AgentRag>) => onChange({ rag: { ...rag, ...patch } });
+  return (
+    <Field label="Connaissances (RAG)" hint="Bases que l'agent peut interroger partout, y compris quand tu lui parles hors projet.">
+      <Pick items={kbs.data ?? []} value={ids} onChange={(v) => onChange({ kb_ids: v })} render={(k) => `📚 ${k.name}`} empty="Aucune base : crée-en dans l'onglet Connaissances." />
+      {ids.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2 rounded-lg border border-line bg-surface-1 p-3">
+          <div className="text-[11px] text-fg-muted">Filtrer par tags (aucun = tous les documents)</div>
+          <Pick
+            items={(tags.data ?? []).map((t) => ({ id: t.tag, ...t }))}
+            value={rag.tags}
+            onChange={(v) => setRag({ tags: v })}
+            render={(t) => `#${t.tag} (${t.count})`}
+            empty="Aucun tag dans ces bases."
+          />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Select value={rag.mode} onChange={(e) => setRag({ mode: e.target.value as AgentRag["mode"] })}>
+              <option value="tool">À la demande (rapide)</option>
+              <option value="auto">Extraits injectés à chaque réponse</option>
+            </Select>
+            <Select value={rag.hybrid ? "on" : "off"} onChange={(e) => setRag({ hybrid: e.target.value === "on" })}>
+              <option value="on">Sens + mots-clés</option>
+              <option value="off">Sens uniquement</option>
+            </Select>
+            <Select value={rag.rerank} onChange={(e) => setRag({ rerank: e.target.value as AgentRag["rerank"] })}>
+              <option value="none">Sans reranking</option>
+              <option value="mmr">Reranking MMR</option>
+              <option value="llm">Reranking LLM (lent)</option>
+            </Select>
+          </div>
+        </div>
+      )}
+    </Field>
   );
 }
 
@@ -605,8 +648,9 @@ function AgentEditor({ initial, meta, onClose, onSaved }: { initial: Partial<Age
         <Field label="Skills">
           <Pick items={skills.data ?? []} value={a.skill_ids ?? []} onChange={(v) => set("skill_ids", v)} render={(s) => s.name} empty="Aucun skill : crée-en dans l'onglet Skills." />
         </Field>
+        <AgentKnowledge value={a} onChange={(patch) => setA((x) => ({ ...x, ...patch }))} />
         <p className="rounded-lg border border-line bg-surface-1 px-3 py-2 text-xs text-fg-muted">
-          📚 Connaissances et 🔌 serveurs MCP se donnent par projet : onglet <b>Équipe</b> du projet → Ressources, agent par agent.
+          🔌 Les serveurs MCP se donnent par projet (onglet <b>Équipe</b> du projet → Ressources). Un projet peut aussi ajouter ses propres bases de connaissances à cet agent.
         </p>
       </div>
     </Drawer>
