@@ -11,6 +11,7 @@ split the work, build it and review each other — entirely on [Ollama](https://
 ![Ollama](https://img.shields.io/badge/models-Ollama-7c6cf6?style=flat-square)
 ![Next.js 16](https://img.shields.io/badge/Next.js-16-111?style=flat-square)
 ![MCP](https://img.shields.io/badge/tools-MCP-ec4899?style=flat-square)
+![License: MIT](https://img.shields.io/badge/license-MIT-f59e0b?style=flat-square)
 
 [**Website**](https://karma91430.github.io/Millikin/) · [Features](#features) · [Get started](#get-started) · [How it works](#how-a-project-runs) · [Architecture](#architecture)
 
@@ -128,4 +129,8 @@ Both are git-ignored.
 
 ## Contributing
 
-Work happens on `features/<name>` branches, merged into `main`. Issues and ideas are welcome.
+Work happens on `features/<name>` branches, merged into `main`. Issues, ideas and forks are welcome.
+
+## License
+
+[MIT](LICENSE) © 2026 Arthur Delerue — you can use, modify and fork Millikin freely, as long as you keep the copyright and license notice.
