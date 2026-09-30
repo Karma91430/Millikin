@@ -10,7 +10,8 @@ import { AgentGraph } from "./AgentGraph";
 import { CallFocus } from "./CallFocus";
 import { AssistantTurn } from "./Thread";
 
-export type Target = { type: "project" | "agent"; id: string; conversationId?: string };
+/** planning: start a scoping discussion that ends with the project breakdown into tasks. */
+export type Target = { type: "project" | "agent"; id: string; conversationId?: string; planning?: boolean };
 
 type Props = {
   agents: Agent[];
@@ -33,7 +34,7 @@ export function ChatView(props: Props) {
       </Empty>
     );
   // One session per target (and per explicitly requested conversation).
-  return <ChatSession key={`${effective.type}:${effective.id}:${effective.conversationId ?? ""}`} {...props} effective={effective} />;
+  return <ChatSession key={`${effective.type}:${effective.id}:${effective.conversationId ?? ""}:${effective.planning ? "plan" : ""}`} {...props} effective={effective} />;
 }
 
 function ChatSession({ agents, projects, onTarget, onNewProject, effective, viewingRef, onRunsChanged }: Props & { effective: Target }) {
@@ -188,7 +189,14 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ conversationId, targetType: effective.type, targetId: effective.id, message: text, approve }),
+        body: JSON.stringify({
+          conversationId,
+          targetType: effective.type,
+          targetId: effective.id,
+          message: text,
+          approve,
+          kind: !conversationId && effective.planning ? "planning" : undefined,
+        }),
         signal: ctrl.signal,
       });
       if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`);
@@ -220,7 +228,8 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
   };
 
   const conv = convs.data?.find((c) => c.id === conversationId);
-  const phase = conv?.phase || (spec?.clarify && !conversationId ? "cadrage" : "");
+  const planning = conv ? conv.kind === "planning" : !!effective.planning && !conversationId;
+  const phase = conv?.phase || ((spec?.clarify || planning) && !conversationId ? "cadrage" : "");
   const awaitingApproval = phase === "cadrage" && !running && messages.at(-1)?.role === "assistant";
 
   if (!lead)
@@ -327,6 +336,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
               {project ? `Premiers contacts : ${[lead, ...coLeads].map((a) => a.name).join(" + ")} · ${teamAgents.length} agents` : lead.role}
             </div>
           </div>
+          {planning && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">planification</span>}
           {phase === "cadrage" && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-400">cadrage</span>}
           {phase === "execution" && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-400">réalisation</span>}
           {running && (
@@ -338,7 +348,14 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
         <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {!messages.length && !pendingUser && (
             <div className="rounded-xl border border-dashed border-line p-4 text-sm text-fg-muted">
-              {project ? (
+              {project && planning ? (
+                <>
+                  <b className="text-fg">Cadrage avant planification.</b> Présente ton projet en quelques phrases, sans tout détailler :{" "}
+                  <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b> vont te poser leurs questions (objectif, périmètre, priorités,
+                  contraintes). Quand tout est clair, clique sur « Valider et créer les tâches » : ils découperont le projet en tâches et en sprints à partir de
+                  votre échange.
+                </>
+              ) : project ? (
                 <>
                   Présente ton idée ou ta demande à <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b>.
                   {spec?.clarify
@@ -366,9 +383,19 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
         <div className="border-t border-line p-3">
           {awaitingApproval && (
             <div className="mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-              <span className="flex-1 text-xs text-amber-200">Phase de cadrage : réponds aux questions ci-dessus, ou valide pour lancer la réalisation.</span>
-              <Button size="sm" variant="primary" onClick={() => send("✅ Validé : lance la réalisation en tenant compte de nos échanges.", true)}>
-                <CheckCircle2 size={13} /> Valider et lancer
+              <span className="flex-1 text-xs text-amber-200">
+                {planning
+                  ? "Réponds aux questions, ou valide quand le cadrage te convient : l'équipe créera les tâches."
+                  : "Phase de cadrage : réponds aux questions ci-dessus, ou valide pour lancer la réalisation."}
+              </span>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() =>
+                  send(planning ? "✅ Validé : crée les tâches à partir de notre échange." : "✅ Validé : lance la réalisation en tenant compte de nos échanges.", true)
+                }
+              >
+                <CheckCircle2 size={13} /> {planning ? "Valider et créer les tâches" : "Valider et lancer"}
               </Button>
             </div>
           )}

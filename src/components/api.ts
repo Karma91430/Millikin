@@ -103,7 +103,7 @@ export type RunInfo = {
   endedAt?: number;
   status: "running" | "done" | "error" | "stopped";
 };
-export type Conversation = { id: string; target_type: "project" | "agent"; target_id: string; title: string; phase: "" | "free" | "cadrage" | "execution"; updated_at: number };
+export type Conversation = { id: string; target_type: "project" | "agent"; target_id: string; title: string; phase: "" | "free" | "cadrage" | "execution"; kind: "" | "planning"; updated_at: number };
 export type Message = { id: string; role: "user" | "assistant"; agent_id: string | null; content: string; trace: Trace | null; created_at: number };
 export type Meta = {
   tools: { id: string; label: string; description: string; danger: boolean }[];

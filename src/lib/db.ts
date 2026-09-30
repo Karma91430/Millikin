@@ -87,6 +87,7 @@ const COLUMNS: [string, string, string][] = [
   ["usage_logs", "project_id", "TEXT DEFAULT ''"],
   ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
   ["projects", "resources", "TEXT DEFAULT '{}'"],
+  ["conversations", "kind", "TEXT DEFAULT ''"],
 ];
 
 const slugify = (s: string) =>

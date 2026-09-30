@@ -83,6 +83,7 @@ export function ProjectsView({
   createFrom,
   onCreateHandled,
   onRunsChanged,
+  onPlanChat,
 }: {
   agents: Agent[];
   teams: Team[];
@@ -98,6 +99,8 @@ export function ProjectsView({
   createFrom: string | null;
   onCreateHandled: () => void;
   onRunsChanged: () => void;
+  /** Open a scoping-then-planning discussion with the project's first contacts. */
+  onPlanChat: (projectId: string) => void;
 }) {
   const tasks = useData<Task[]>("/api/crud/tasks");
   const [creating, setCreating] = useState(false);
@@ -166,6 +169,7 @@ export function ProjectsView({
           reloadProjects={reloadProjects}
           onAgentsChange={onAgentsChange}
           onRunsChanged={onRunsChanged}
+          onPlanChat={() => onPlanChat(project.id)}
           onDeleted={() => (onSelect(null), reloadProjects())}
         />
       ) : (
@@ -177,11 +181,12 @@ export function ProjectsView({
           teams={teams}
           templateId={createFrom}
           onClose={() => (setCreating(false), onCreateHandled())}
-          onCreated={(p) => {
+          onCreated={(p, scoping) => {
             setCreating(false);
             onCreateHandled();
             reloadProjects();
             onSelect(p.id);
+            if (scoping) onPlanChat(p.id);
           }}
         />
       )}
@@ -189,7 +194,8 @@ export function ProjectsView({
   );
 }
 
-function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; templateId: string | null; onClose: () => void; onCreated: (p: Project) => void }) {
+function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; templateId: string | null; onClose: () => void; onCreated: (p: Project, scoping: boolean) => void }) {
+  const [scoping, setScoping] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [template, setTemplate] = useState(templateId && templateId !== "__new" ? templateId : (teams[0]?.id ?? ""));
@@ -212,7 +218,7 @@ function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; 
             onClick={async () => {
               setBusy(true);
               try {
-                onCreated(await api<Project>("/api/projects", { method: "POST", json: { name, description, template_id: template, path: dir } }));
+                onCreated(await api<Project>("/api/projects", { method: "POST", json: { name, description, template_id: template, path: dir } }), scoping);
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
                 setBusy(false);
@@ -245,6 +251,13 @@ function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; 
         <Field label="Dossier du projet (optionnel)" hint="Vide : un dossier dédié est créé dans workspace/ avec le nom du projet.">
           <Input className="font-mono text-xs" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="/Users/moi/Projets/reservation-salles" />
         </Field>
+        <label className="flex items-start gap-2 rounded-lg border border-line bg-surface-1 p-3 text-sm">
+          <input type="checkbox" checked={scoping} onChange={(e) => setScoping(e.target.checked)} className="mt-0.5 accent-[var(--accent)]" />
+          <span>
+            <span className="block font-medium">Démarrer par un échange de cadrage avec l&apos;équipe</span>
+            <span className="block text-xs text-fg-muted">Les premiers contacts te posent leurs questions, puis découpent le projet en tâches quand tu valides.</span>
+          </span>
+        </label>
       </div>
     </Modal>
   );
@@ -260,6 +273,7 @@ function ProjectDetail({
   reloadProjects,
   onAgentsChange,
   onRunsChanged,
+  onPlanChat,
   onDeleted,
 }: {
   project: Project;
@@ -271,6 +285,7 @@ function ProjectDetail({
   reloadProjects: () => void;
   onAgentsChange: () => void;
   onRunsChanged: () => void;
+  onPlanChat: () => void;
   onDeleted: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -398,7 +413,9 @@ function ProjectDetail({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} />}
-        {tab === "tasks" && <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} />}
+        {tab === "tasks" && (
+          <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} onPlanChat={onPlanChat} />
+        )}
         {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
         {tab === "team" && <TeamTab project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
@@ -596,6 +613,7 @@ function Board({
   reload,
   runs,
   onRunsChanged,
+  onPlanChat,
 }: {
   project: Project;
   tasks: Task[];
@@ -604,6 +622,7 @@ function Board({
   reload: () => void;
   runs: RunInfo[];
   onRunsChanged: () => void;
+  onPlanChat: () => void;
 }) {
   const [edit, setEdit] = useState<Partial<Task> | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
@@ -828,6 +847,7 @@ function Board({
       {planOpen && (
         <PlanModal
           project={project}
+          onChat={() => (setPlanOpen(false), onPlanChat())}
           onClose={() => setPlanOpen(false)}
           onStarted={() => {
             setPlanOpen(false);
@@ -1224,7 +1244,8 @@ function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>;
   );
 }
 
-function PlanModal({ project, onClose, onStarted }: { project: Project; onClose: () => void; onStarted: () => void }) {
+function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; onChat: () => void; onClose: () => void; onStarted: () => void }) {
+  const [direct, setDirect] = useState(false);
   const [brief, setBrief] = useState("");
   const [sprints, setSprints] = useState(true);
   const [error, setError] = useState<string>();
@@ -1239,24 +1260,40 @@ function PlanModal({ project, onClose, onStarted }: { project: Project; onClose:
           <Button variant="ghost" onClick={onClose}>
             Annuler
           </Button>
-          <Button
-            variant="primary"
-            onClick={async () => {
-              try {
-                await api("/api/projects/plan", { method: "POST", json: { projectId: project.id, brief, sprints } });
-                onStarted();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              }
-            }}
-          >
-            <ListTree size={14} /> Lancer la planification
-          </Button>
+          {direct && (
+            <Button
+              variant="primary"
+              onClick={async () => {
+                try {
+                  await api("/api/projects/plan", { method: "POST", json: { projectId: project.id, brief, sprints } });
+                  onStarted();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              <ListTree size={14} /> Planifier directement
+            </Button>
+          )}
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <ErrorNote>{error}</ErrorNote>
+        <button onClick={onChat} className="flex items-start gap-3 rounded-xl border border-accent/40 bg-accent/5 p-3 text-left hover:border-accent">
+          <span className="text-xl">💬</span>
+          <span>
+            <span className="block text-sm font-medium">Discuter d&apos;abord avec l&apos;équipe (recommandé)</span>
+            <span className="block text-xs text-fg-muted">
+              Présente le projet en quelques phrases : les premiers contacts te posent leurs questions, puis créent les tâches quand tu valides.
+            </span>
+          </span>
+        </button>
+        <button onClick={() => setDirect(!direct)} className="text-left text-xs text-fg-muted hover:text-fg">
+          {direct ? "▾" : "▸"} Ou planifier directement à partir d&apos;une consigne
+        </button>
+        {direct && (
+        <>
         <p className="text-sm text-fg-muted">
           Le premier contact reprend le contexte (description, journal des décisions, fichiers, tâches existantes)
           {entries > 1 ? ", se concerte avec les autres premiers contacts" : ""} puis découpe le travail en tâches avec responsable, complexité, priorité et dépendances.
@@ -1269,6 +1306,8 @@ function PlanModal({ project, onClose, onStarted }: { project: Project; onClose:
           Organiser les tâches en sprints
         </label>
         <p className="text-xs text-fg-subtle">Compte quelques minutes en local. Les tâches apparaissent dans le tableau à la fin ; tu peux suivre la réflexion en direct.</p>
+        </>
+        )}
       </div>
     </Modal>
   );

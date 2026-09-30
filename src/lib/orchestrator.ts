@@ -27,6 +27,16 @@ Ne fais pas réaliser le travail maintenant. Ton rôle :
 3. Pose les questions nécessaires pour lever les ambiguïtés (numérotées, 3 à 6 maximum, les plus importantes d'abord).
 Termine en demandant à l'utilisateur de répondre aux questions ou de valider pour lancer la réalisation.`;
 
+/** Scoping that prepares the project breakdown (used by planning conversations). */
+export const PLANNING_SCOPING = `## Cadrage avant planification
+L'objectif de cet échange est de préparer le découpage du projet en tâches. Tu ne crées aucune tâche maintenant.
+1. À partir de ce que dit l'utilisateur, reformule en quelques lignes ce que tu as compris.
+2. Pose les questions essentielles qui manquent, 3 à 5 à la fois au maximum, les plus importantes d'abord :
+   objectif et utilisateurs, périmètre de la première version (MVP), fonctionnalités prioritaires, contraintes techniques (langage, plateforme, intégrations), livrables attendus, délais.
+3. Quand les éléments de base sont clairs, présente un résumé du cadrage (objectif, périmètre, priorités, contraintes, grandes étapes)
+   et invite l'utilisateur à cliquer sur « Valider et créer les tâches » s'il est d'accord.
+Sois concret et bref : c'est une discussion, pas un document.`;
+
 const PHASE_EXECUTION = `## Phase de réalisation (validée par l'utilisateur)
 1. Répartis le travail avec ask_agent : une consigne précise et autonome par membre (objectif, contraintes, fichiers attendus).
 2. Contrôle chaque résultat reçu : s'il est incomplet, faux ou hors sujet, redemande une correction au même membre en expliquant quoi corriger.
@@ -79,6 +89,8 @@ export type RunParams = {
   consultOnly?: boolean;
   /** Tools withheld for this run and its delegations (e.g. board edits during a task review). */
   excludeTools?: string[];
+  /** Replaces the default scoping instructions (e.g. scoping before planning). */
+  scopingNote?: string;
   emit: Emit;
   signal?: AbortSignal;
   /** Workspace + project shared by every agent of the run (files, commands, tasks). */
@@ -136,7 +148,7 @@ export async function runAgent(p: RunParams): Promise<string> {
       const everyone = team.spec.agent_ids.map((id) => team.agents.get(id)).filter((a): a is Agent => !!a && a.id !== agent.id);
       if (everyone.length)
         sys.push("## L'équipe du projet\n" + everyone.map((m) => `- ${m.emoji} ${m.name} : ${m.role}${entries.includes(m.id) ? " (premier contact avec toi)" : ""}`).join("\n"));
-      if (phase === "cadrage") sys.push(PHASE_CADRAGE);
+      if (phase === "cadrage") sys.push(p.scopingNote ?? PHASE_CADRAGE);
       if (phase === "execution") sys.push(PHASE_EXECUTION);
     }
 
@@ -279,7 +291,7 @@ export async function runAgent(p: RunParams): Promise<string> {
       const opinions = await Promise.all(
         coLeads.map(async (c) => {
           const brief = `${agent.name} et toi êtes les premiers contacts de l'utilisateur sur ce projet. Voici son dernier message :\n« ${p.input} »\n\nDonne ton analyse selon ton rôle (${c.role}) : points clés, risques, approche proposée, et les questions à poser à l'utilisateur. Sois concis et concret.`;
-          const out = await delegate(p, callId, c, brief, { history: p.history, consultOnly: true, phase });
+          const out = await delegate(p, callId, c, brief, { history: p.history, consultOnly: true, phase, scopingNote: undefined });
           return `### ${c.emoji} ${c.name} (${c.role})\n${out}`;
         }),
       );
