@@ -125,6 +125,8 @@ export async function chatStream(opts: {
   think?: Think;
   signal?: AbortSignal;
   agentId?: string | null;
+  /** Attributes usage to a project (per-project stats). */
+  projectId?: string | null;
   source?: string;
   json?: boolean;
   onText?: (t: string) => void;
@@ -232,18 +234,18 @@ export async function chatStream(opts: {
       }
     });
     emit(pending);
-    logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, source: opts.source ?? "agent", ...usage, latency_ms: Date.now() - started, status: "ok" });
+    logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", ...usage, latency_ms: Date.now() - started, status: "ok" });
     opts.signal?.removeEventListener("abort", onOuterAbort);
     return { content, reasoning, toolCalls, usage };
   } catch (e) {
     if (overthinking && !opts.signal?.aborted) {
-      logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, source: opts.source ?? "agent", latency_ms: Date.now() - started, status: "error", error: "réflexion trop longue, relance sans réflexion" });
+      logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", latency_ms: Date.now() - started, status: "error", error: "réflexion trop longue, relance sans réflexion" });
       opts.onReasoning?.("\n\n[Réflexion trop longue : réponse directe sans réflexion]\n");
       return chatStream({ ...opts, think: "off" });
     }
     const msg = e instanceof Error ? e.message : String(e);
     if (!opts.signal?.aborted)
-      logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, source: opts.source ?? "agent", latency_ms: Date.now() - started, status: "error", error: msg });
+      logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", latency_ms: Date.now() - started, status: "error", error: msg });
     throw e;
   }
 }

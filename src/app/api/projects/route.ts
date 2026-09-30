@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   return Response.json(project);
 }
 
-/** Delete a project with its conversations and tasks. Files on disk are kept. */
+/** Delete a project with its conversations, tasks and sprints. Files on disk are kept. */
 export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return Response.json({ error: "id manquant" }, { status: 400 });
@@ -31,6 +31,7 @@ export async function DELETE(req: Request) {
   for (const c of convs) d.prepare("DELETE FROM messages WHERE conversation_id = ?").run(c.id);
   d.prepare("DELETE FROM conversations WHERE target_type = 'project' AND target_id = ?").run(id);
   d.prepare("DELETE FROM tasks WHERE project_id = ?").run(id);
+  d.prepare("DELETE FROM sprints WHERE project_id = ?").run(id);
   d.prepare("DELETE FROM projects WHERE id = ?").run(id);
   return Response.json({ ok: true });
 }

@@ -10,7 +10,9 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  CalendarRange,
   Link2,
+  ListTree,
   Loader2,
   Lock,
   MessageSquare,
@@ -25,7 +27,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
-import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Task, type Team } from "../api";
+import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
 import { CallFocus } from "../chat/CallFocus";
 import { TeamBuilder } from "../TeamBuilder";
 import { Avatar, Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, Select, Textarea } from "../ui";
@@ -44,7 +46,8 @@ const PRIORITY: Record<Task["priority"], { label: string; color?: string }> = {
 };
 type Entry = { path: string; dir: boolean; size: number; mtime: number };
 type Workspace = { root: string; entries: Entry[] };
-type Tab = "overview" | "tasks" | "files" | "team";
+type Tab = "overview" | "tasks" | "files" | "team" | "stats";
+const POINTS = [0, 1, 2, 3, 5, 8, 13];
 
 const ago = (ms: number) => {
   const s = Math.round((Date.now() - ms) / 1000);
@@ -378,6 +381,7 @@ function ProjectDetail({
               ["tasks", `Tâches (${tasks.length})`],
               ["files", `Fichiers (${ws.data?.entries.filter((e) => !e.dir).length ?? 0})`],
               ["team", `Équipe (${people.length})`],
+              ["stats", "Stats"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -394,6 +398,7 @@ function ProjectDetail({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} />}
         {tab === "tasks" && <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} />}
+        {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
         {tab === "team" && <ProjectTeam project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
       </div>
@@ -582,6 +587,26 @@ function Board({
   const [local, setLocal] = useState<Record<string, Task["status"]>>({});
   const [error, setError] = useState<string>();
   const [retry, setRetry] = useState(true);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [sprintEdit, setSprintEdit] = useState<Partial<Sprint> | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const sprintData = useData<Sprint[]>("/api/crud/sprints");
+  const sprints = (sprintData.data ?? []).filter((x) => x.project_id === project.id);
+  const planRun = runs.find((r) => r.status === "running" && r.conversationId === `plan:${project.id}`);
+  const planTrace = useRunTrace(`plan:${project.id}`, !!planRun);
+  // The planner creates sprints: refresh them while it runs and right after.
+  useEffect(() => {
+    sprintData.reload();
+    if (!planRun) return;
+    const t = setInterval(sprintData.reload, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planRun?.id]);
+  const [filterChoice, setFilter] = useState<string | null>(null);
+  const validChoice = filterChoice === "all" || filterChoice === "backlog" || sprints.some((x) => x.id === filterChoice) ? filterChoice : null;
+  const filter = validChoice ?? sprints.find((x) => x.status === "active")?.id ?? "all";
+  const inFilter = (t: Task) => filter === "all" || (filter === "backlog" ? !t.sprint_id || !sprints.some((x) => x.id === t.sprint_id) : t.sprint_id === filter);
+  const currentSprint = sprints.find((x) => x.id === filter);
   const byId = allAgents;
   const running = new Set(runs.filter((r) => r.status === "running" && r.conversationId.startsWith("task:")).map((r) => r.conversationId.slice(5)));
   const chain = runs.find((r) => r.status === "running" && r.conversationId === `chain:${project.id}`);
@@ -591,7 +616,7 @@ function Board({
   const launchChain = async () => {
     setError(undefined);
     try {
-      await api("/api/tasks/chain", { method: "POST", json: { projectId: project.id, retry } });
+      await api("/api/tasks/chain", { method: "POST", json: { projectId: project.id, retry, sprintId: currentSprint?.id } });
       onRunsChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -622,9 +647,24 @@ function Board({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-2 px-6 pt-4">
-        <Button variant="primary" size="sm" onClick={() => setEdit({ project_id: project.id, title: "", description: "", status: "todo", priority: "normal", assignee_id: "", notes: [] })}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() =>
+            setEdit({ project_id: project.id, title: "", description: "", status: "todo", priority: "normal", assignee_id: "", notes: [], complexity: 0, sprint_id: currentSprint?.id ?? "", depends_on: [] })
+          }
+        >
           <Plus size={14} /> Tâche
         </Button>
+        {planRun ? (
+          <button onClick={() => planTrace && setFocus(planTrace.order.find((id) => !planTrace.calls[id].parentCallId) ?? null)} className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs text-accent">
+            <Loader2 size={12} className="animate-spin" /> Planification en cours… suivre
+          </button>
+        ) : (
+          <Button size="sm" variant="soft" onClick={() => setPlanOpen(true)} title="Le premier contact découpe le projet en tâches (avec les autres premiers contacts)">
+            <ListTree size={13} /> Planifier
+          </Button>
+        )}
         {chain ? (
           <>
             <span className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs text-accent">
@@ -636,8 +676,8 @@ function Board({
           </>
         ) : (
           <>
-            <Button size="sm" variant="soft" onClick={launchChain} title="Exécute toutes les tâches ouvertes dans l'ordre des dépendances">
-              <Link2 size={13} /> Lancer la chaîne
+            <Button size="sm" variant="soft" onClick={launchChain} title="Exécute les tâches ouvertes (du sprint affiché) dans l'ordre des dépendances">
+              <Link2 size={13} /> {currentSprint ? `Lancer le ${currentSprint.name}` : "Lancer la chaîne"}
             </Button>
             <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Si le contrôle renvoie « à corriger », la tâche est relancée une fois avec le retour avant d'arrêter la chaîne">
               <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} className="accent-[var(--accent)]" />
@@ -652,9 +692,27 @@ function Board({
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-6 md:grid-cols-4">
+      <SprintBar
+        sprints={sprints}
+        tasks={tasks}
+        filter={filter}
+        onFilter={setFilter}
+        onNew={() => setSprintEdit({ project_id: project.id, name: `Sprint ${sprints.length + 1}`, goal: "", start_date: "", end_date: "", status: "planned" })}
+        onEdit={setSprintEdit}
+        onAction={async (id, action) => {
+          setError(undefined);
+          try {
+            await api("/api/sprints/action", { method: "POST", json: { id, action } });
+            sprintData.reload();
+            reload();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          }
+        }}
+      />
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-6 pb-6 pt-3 md:grid-cols-4">
         {COLUMNS.map((col) => {
-          const items = tasks.filter((t) => statusOf(t) === col.id);
+          const items = tasks.filter((t) => inFilter(t) && statusOf(t) === col.id);
           return (
             <div key={col.id} onDragOver={(e) => e.preventDefault()} onDrop={() => drag && move(drag, col.id)} className="flex min-h-40 flex-col rounded-xl border border-line bg-surface-1/50">
               <div className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium">
@@ -716,6 +774,7 @@ function Board({
                       <div className="mt-2 flex items-center gap-1.5">
                         {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
                         {t.evaluation && <EvalBadge e={t.evaluation} />}
+                        {t.complexity > 0 && <Badge>{t.complexity} pts</Badge>}
                         {t.priority !== "normal" && <Badge color={PRIORITY[t.priority].color}>{PRIORITY[t.priority].label}</Badge>}
                         {t.notes?.length > 0 && <Badge>{t.notes.length} 💬</Badge>}
                         <span className="ml-auto text-[10px] text-fg-subtle">#{t.id.slice(0, 5)}</span>
@@ -734,6 +793,7 @@ function Board({
           initial={edit}
           live={tasks.find((t) => t.id === edit.id)}
           projectTasks={tasks}
+          sprints={sprints}
           agents={agents}
           byId={byId}
           running={!!edit.id && running.has(edit.id)}
@@ -742,6 +802,18 @@ function Board({
           onSaved={reload}
         />
       )}
+      {planOpen && (
+        <PlanModal
+          project={project}
+          onClose={() => setPlanOpen(false)}
+          onStarted={() => {
+            setPlanOpen(false);
+            onRunsChanged();
+          }}
+        />
+      )}
+      {sprintEdit && <SprintEditor initial={sprintEdit} onClose={() => setSprintEdit(null)} onSaved={() => (sprintData.reload(), reload())} />}
+      {focus && planTrace && <CallFocus trace={planTrace} callId={focus} agents={byId} onClose={() => setFocus(null)} onFocus={setFocus} />}
     </div>
   );
 }
@@ -750,6 +822,7 @@ function TaskEditor({
   initial,
   live,
   projectTasks,
+  sprints,
   agents,
   byId,
   running,
@@ -760,6 +833,7 @@ function TaskEditor({
   initial: Partial<Task>;
   live?: Task;
   projectTasks: Task[];
+  sprints: Sprint[];
   agents: Agent[];
   byId: Map<string, Agent>;
   running: boolean;
@@ -777,7 +851,16 @@ function TaskEditor({
   const roots = trace ? trace.order.map((id) => trace.calls[id]).filter((c) => c && !c.parentCallId) : [];
   const save = async () => {
     // Agent-maintained fields are never overwritten from the dialog.
-    const editable = { id: t.id, title: t.title, description: t.description, priority: t.priority, assignee_id: t.assignee_id, depends_on: t.depends_on ?? [] };
+    const editable = {
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      priority: t.priority,
+      assignee_id: t.assignee_id,
+      depends_on: t.depends_on ?? [],
+      complexity: t.complexity ?? 0,
+      sprint_id: t.sprint_id ?? "",
+    };
     await crud.save("tasks", t.id ? editable : t);
     onSaved();
   };
@@ -875,6 +958,30 @@ function TaskEditor({
             </Field>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Complexité (points)">
+              <Select value={t.complexity ?? 0} onChange={(e) => set("complexity", Number(e.target.value))}>
+                {POINTS.map((p) => (
+                  <option key={p} value={p}>
+                    {p ? `${p} pt${p > 1 ? "s" : ""}` : "Non estimée"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Sprint">
+              <Select value={t.sprint_id ?? ""} onChange={(e) => set("sprint_id", e.target.value)}>
+                <option value="">Backlog</option>
+                {sprints
+                  .filter((sp) => sp.status !== "done" || sp.id === t.sprint_id)
+                  .map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name}
+                      {sp.status === "active" ? " (actif)" : sp.status === "done" ? " (clôturé)" : ""}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+          </div>
           <Field label="Dépend de" hint="La tâche reste bloquée tant que celles-ci ne sont pas terminées ; leur compte rendu est transmis à l'agent au lancement.">
             <DependencyPick task={t} tasks={projectTasks} value={t.depends_on ?? []} onChange={(v) => set("depends_on", v)} />
           </Field>
@@ -932,6 +1039,349 @@ function TaskEditor({
       </Modal>
       {focus && trace && <CallFocus trace={trace} callId={focus} agents={byId} onClose={() => setFocus(null)} onFocus={setFocus} />}
     </>
+  );
+}
+
+/** Backlog / sprint selector with progress and sprint actions. */
+function SprintBar({
+  sprints,
+  tasks,
+  filter,
+  onFilter,
+  onNew,
+  onEdit,
+  onAction,
+}: {
+  sprints: Sprint[];
+  tasks: Task[];
+  filter: string;
+  onFilter: (f: string) => void;
+  onNew: () => void;
+  onEdit: (s: Sprint) => void;
+  onAction: (id: string, action: "start" | "close") => void;
+}) {
+  const pts = (ts: Task[]) => ts.reduce((n, t) => n + (t.complexity || 0), 0);
+  const backlog = tasks.filter((t) => !t.sprint_id || !sprints.some((x) => x.id === t.sprint_id));
+  const current = sprints.find((x) => x.id === filter);
+  const mine = current ? tasks.filter((t) => t.sprint_id === current.id) : [];
+  const done = pts(mine.filter((t) => t.status === "done"));
+  const total = pts(mine);
+  const chip = (id: string, label: React.ReactNode) => (
+    <button key={id} onClick={() => onFilter(id)} className={cx("flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs", filter === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="px-6 pt-3">
+      <div className="flex flex-wrap items-center gap-1">
+        {chip("all", `Tout (${tasks.length})`)}
+        {chip("backlog", `Backlog (${backlog.length})`)}
+        {sprints.map((sp) =>
+          chip(
+            sp.id,
+            <>
+              {sp.status === "active" && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+              <span className={cx(sp.status === "done" && "line-through opacity-60")}>{sp.name}</span>
+              <span className="text-fg-subtle">({tasks.filter((t) => t.sprint_id === sp.id).length})</span>
+            </>,
+          ),
+        )}
+        <button onClick={onNew} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg">
+          <Plus size={12} /> Sprint
+        </button>
+      </div>
+      {current && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface-1 px-3 py-2">
+          <CalendarRange size={15} className="text-fg-muted" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {current.name}
+              <Badge color={current.status === "active" ? "#10b981" : current.status === "done" ? "#64748b" : "#8b5cf6"}>
+                {current.status === "active" ? "actif" : current.status === "done" ? "clôturé" : "planifié"}
+              </Badge>
+              {(current.start_date || current.end_date) && (
+                <span className="text-xs font-normal text-fg-subtle">
+                  {current.start_date || "?"} → {current.end_date || "?"}
+                </span>
+              )}
+            </div>
+            {current.goal && <div className="truncate text-xs text-fg-muted">🎯 {current.goal}</div>}
+          </div>
+          <div className="w-40">
+            <div className="mb-1 flex justify-between text-[11px] text-fg-muted">
+              <span>avancement</span>
+              <span className="tabular-nums">
+                {done}/{total} pts
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+              <div className="h-full bg-emerald-500" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+            </div>
+          </div>
+          {current.status === "planned" && (
+            <Button size="sm" variant="primary" onClick={() => onAction(current.id, "start")}>
+              Démarrer
+            </Button>
+          )}
+          {current.status === "active" && (
+            <Button
+              size="sm"
+              variant="soft"
+              onClick={() => confirm("Clôturer le sprint ? Les tâches non terminées passent au sprint suivant (ou au backlog).") && onAction(current.id, "close")}
+            >
+              Clôturer
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => onEdit(current)} title="Modifier le sprint">
+            <Pencil size={13} />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>; onClose: () => void; onSaved: () => void }) {
+  const [sp, setSp] = useState(initial);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={sp.id ? `Sprint : ${sp.name}` : "Nouveau sprint"}
+      footer={
+        <>
+          {sp.id && (
+            <Button
+              variant="danger"
+              onClick={async () => {
+                if (!confirm(`Supprimer « ${sp.name} » ? Ses tâches repassent au backlog.`)) return;
+                await crud.remove("sprints", sp.id!);
+                onSaved();
+                onClose();
+              }}
+            >
+              <Trash2 size={14} />
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!sp.name?.trim()}
+            onClick={async () => {
+              await crud.save("sprints", sp);
+              onSaved();
+              onClose();
+            }}
+          >
+            Enregistrer
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Field label="Nom">
+          <Input value={sp.name} onChange={(e) => setSp({ ...sp, name: e.target.value })} />
+        </Field>
+        <Field label="Objectif du sprint">
+          <Textarea rows={2} value={sp.goal} onChange={(e) => setSp({ ...sp, goal: e.target.value })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Début">
+            <Input type="date" value={sp.start_date} onChange={(e) => setSp({ ...sp, start_date: e.target.value })} />
+          </Field>
+          <Field label="Fin">
+            <Input type="date" value={sp.end_date} onChange={(e) => setSp({ ...sp, end_date: e.target.value })} />
+          </Field>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PlanModal({ project, onClose, onStarted }: { project: Project; onClose: () => void; onStarted: () => void }) {
+  const [brief, setBrief] = useState("");
+  const [sprints, setSprints] = useState(true);
+  const [error, setError] = useState<string>();
+  const entries = specFromTeam(project.team).entry_ids.length;
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Planifier le projet"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            onClick={async () => {
+              try {
+                await api("/api/projects/plan", { method: "POST", json: { projectId: project.id, brief, sprints } });
+                onStarted();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              }
+            }}
+          >
+            <ListTree size={14} /> Lancer la planification
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <ErrorNote>{error}</ErrorNote>
+        <p className="text-sm text-fg-muted">
+          Le premier contact reprend le contexte (description, journal des décisions, fichiers, tâches existantes)
+          {entries > 1 ? ", se concerte avec les autres premiers contacts" : ""} puis découpe le travail en tâches avec responsable, complexité, priorité et dépendances.
+        </p>
+        <Field label="Consigne (optionnelle)">
+          <Textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="ex : priorité au MVP, pas d'interface graphique pour l'instant" />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={sprints} onChange={(e) => setSprints(e.target.checked)} className="accent-[var(--accent)]" />
+          Organiser les tâches en sprints
+        </label>
+        <p className="text-xs text-fg-subtle">Compte quelques minutes en local. Les tâches apparaissent dans le tableau à la fin ; tu peux suivre la réflexion en direct.</p>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- stats
+
+type Stats = {
+  usage: { calls: number; prompt_tokens: number; completion_tokens: number; compute_ms: number; errors: number };
+  byAgent: { agent_id: string; name: string; emoji: string; color: string; calls: number; tokens: number; compute_ms: number }[];
+  tasks: {
+    total: number;
+    byStatus: Record<Task["status"], number>;
+    points: number;
+    pointsDone: number;
+    avgScore: number | null;
+    corrections: number;
+    firstTry: number;
+    estimated: number;
+  };
+  sprints: { id: string; name: string; status: Sprint["status"]; planned: number; done: number; tasks: number }[];
+  conversations: number;
+};
+
+const fmtMs = (ms: number) => (ms >= 3600000 ? `${(ms / 3600000).toFixed(1)} h` : ms >= 60000 ? `${Math.round(ms / 60000)} min` : `${Math.round(ms / 1000)} s`);
+const fmtN = (n: number) => Math.round(n || 0).toLocaleString("fr-FR");
+
+function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean }) {
+  const st = useData<Stats>(`/api/projects/stats?id=${projectId}`);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(st.reload, 5000);
+    return () => clearInterval(t);
+  }, [busy, st.reload]);
+  const s = st.data;
+  if (!s) return <div className="p-6 text-sm text-fg-muted">{st.error ?? "Chargement…"}</div>;
+  const maxAgent = Math.max(1, ...s.byAgent.map((a) => a.compute_ms));
+  const maxSprint = Math.max(1, ...s.sprints.map((x) => x.planned));
+  const tiles: [string, string, string?][] = [
+    ["Temps de calcul", fmtMs(s.usage.compute_ms), `${fmtN(s.usage.calls)} appels au modèle`],
+    ["Tokens", fmtN(s.usage.prompt_tokens + s.usage.completion_tokens), `${fmtN(s.usage.prompt_tokens)} en entrée · ${fmtN(s.usage.completion_tokens)} en sortie`],
+    ["Avancement", `${s.tasks.byStatus.done}/${s.tasks.total} tâches`, s.tasks.points ? `${s.tasks.pointsDone}/${s.tasks.points} points` : "complexité non estimée"],
+    ["Qualité", s.tasks.avgScore !== null ? `${s.tasks.avgScore.toFixed(1)}/5` : "—", `${s.tasks.firstTry} validée(s) du premier coup · ${s.tasks.corrections} correction(s)`],
+  ];
+  return (
+    <div className="flex flex-col gap-4 p-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map(([label, value, sub]) => (
+          <Card key={label} className="p-4">
+            <div className="text-xs text-fg-muted">{label}</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+            {sub && <div className="mt-0.5 text-[11px] text-fg-subtle">{sub}</div>}
+          </Card>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Temps de calcul par agent</div>
+          <div className="flex flex-col gap-2.5 p-4">
+            {s.byAgent.map((a) => (
+              <div key={a.agent_id} className="text-xs" title={`${a.name} : ${fmtMs(a.compute_ms)} · ${fmtN(a.calls)} appels · ${fmtN(a.tokens)} tokens`}>
+                <div className="mb-1 flex justify-between">
+                  <span>
+                    {a.emoji} {a.name ?? "agent supprimé"}
+                  </span>
+                  <span className="tabular-nums text-fg-muted">
+                    {fmtMs(a.compute_ms)} · {fmtN(a.tokens)} tokens
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${(a.compute_ms / maxAgent) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+            {!s.byAgent.length && <div className="text-sm text-fg-subtle">Aucune activité enregistrée pour ce projet.</div>}
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <span className="text-sm font-semibold">Vélocité par sprint</span>
+            <span className="flex items-center gap-3 text-[11px] text-fg-muted">
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-surface-3 ring-1 ring-line-strong" /> planifié
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-accent" /> terminé
+              </span>
+            </span>
+          </div>
+          <div className="flex flex-col gap-2.5 p-4">
+            {s.sprints.map((x) => (
+              <div key={x.id} className="text-xs" title={`${x.name} : ${x.done}/${x.planned} points terminés (${x.tasks} tâches)`}>
+                <div className="mb-1 flex justify-between">
+                  <span>
+                    {x.name} <span className="text-fg-subtle">· {x.status === "active" ? "actif" : x.status === "done" ? "clôturé" : "planifié"}</span>
+                  </span>
+                  <span className="tabular-nums text-fg-muted">
+                    {x.done}/{x.planned} pts
+                  </span>
+                </div>
+                <div className="relative h-2 overflow-hidden rounded-full bg-surface-3" style={{ width: `${Math.max(8, (x.planned / maxSprint) * 100)}%` }}>
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${x.planned ? (x.done / x.planned) * 100 : 0}%` }} />
+                </div>
+              </div>
+            ))}
+            {!s.sprints.length && <div className="text-sm text-fg-subtle">Aucun sprint. Crée-en depuis le tableau, ou laisse « Planifier » les proposer.</div>}
+          </div>
+        </Card>
+      </div>
+      <Card className="overflow-x-auto">
+        <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Tâches</div>
+        <table className="w-full text-xs">
+          <tbody>
+            {COLUMNS.map((c) => (
+              <tr key={c.id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2">
+                  <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: c.color }} />
+                  {c.label}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums">{s.tasks.byStatus[c.id]}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="px-4 py-2 text-fg-muted">Estimées (complexité renseignée)</td>
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">
+                {s.tasks.estimated}/{s.tasks.total}
+              </td>
+            </tr>
+            <tr>
+              <td className="px-4 py-2 text-fg-muted">Conversations du projet</td>
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{s.conversations}</td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+    </div>
   );
 }
 

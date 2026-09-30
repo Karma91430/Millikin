@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '', path TEXT DEFAULT '',
   template_id TEXT DEFAULT '', team TEXT DEFAULT '{}', created_at INTEGER, updated_at INTEGER);
+CREATE TABLE IF NOT EXISTS sprints (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, goal TEXT DEFAULT '',
+  start_date TEXT DEFAULT '', end_date TEXT DEFAULT '', status TEXT DEFAULT 'planned',
+  created_at INTEGER, updated_at INTEGER);
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY, category TEXT DEFAULT 'Mes profils', name TEXT NOT NULL, role TEXT DEFAULT '', emoji TEXT DEFAULT '🤖',
   color TEXT DEFAULT '#6366f1', system_prompt TEXT DEFAULT '', tools TEXT DEFAULT '[]', think TEXT DEFAULT '',
@@ -77,6 +81,9 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "evaluation", "TEXT DEFAULT 'null'"],
   ["tasks", "trace", "TEXT DEFAULT 'null'"],
   ["tasks", "depends_on", "TEXT DEFAULT '[]'"],
+  ["tasks", "complexity", "INTEGER DEFAULT 0"],
+  ["tasks", "sprint_id", "TEXT DEFAULT ''"],
+  ["usage_logs", "project_id", "TEXT DEFAULT ''"],
 ];
 
 const slugify = (s: string) =>
@@ -206,9 +213,10 @@ export const ENTITIES: Record<string, EntityDef> = {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
     bool: [],
-    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on"],
+    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id"],
     order: "created_at",
   },
+  sprints: { table: "sprints", json: [], bool: [], cols: ["project_id", "name", "goal", "start_date", "end_date", "status"], order: "created_at" },
   profiles: {
     table: "profiles",
     json: ["tools"],
@@ -336,6 +344,9 @@ export type Task = {
   trace: unknown;
   /** Ids of tasks that must be done first. */
   depends_on: string[];
+  /** Story points (1, 2, 3, 5, 8, 13); 0 = not estimated. */
+  complexity: number;
+  sprint_id: string;
   title: string;
   description: string;
   status: "todo" | "doing" | "review" | "done";
@@ -343,6 +354,15 @@ export type Task = {
   assignee_id: string;
   created_by: string;
   notes: { at: number; by: string; text: string }[];
+};
+export type Sprint = {
+  id: string;
+  project_id: string;
+  name: string;
+  goal: string;
+  start_date: string;
+  end_date: string;
+  status: "planned" | "active" | "done";
 };
 export type Skill = { id: string; name: string; description: string; content: string };
 export type McpServer = {
@@ -363,6 +383,7 @@ export function logUsage(u: {
   provider: string;
   model: string;
   agent_id?: string | null;
+  project_id?: string | null;
   source: string;
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -372,7 +393,7 @@ export function logUsage(u: {
 }) {
   db()
     .prepare(
-      "INSERT INTO usage_logs (ts, provider, model, agent_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO usage_logs (ts, provider, model, agent_id, project_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(now(), u.provider, u.model, u.agent_id ?? null, u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
+    .run(now(), u.provider, u.model, u.agent_id ?? null, u.project_id ?? "", u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
 }
