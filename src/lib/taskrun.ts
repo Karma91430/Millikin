@@ -163,11 +163,12 @@ export const chainKey = (projectId: string) => `chain:${projectId}`;
  * Run every open task of a project in dependency order. Independent tasks run side by side
  * (up to `parallel`); each task is its own run, so the board and live views work as usual.
  */
-export function startChainRun(projectId: string, opts: { retry: boolean; parallel?: number }): Run {
+export function startChainRun(projectId: string, opts: { retry: boolean; parallel?: number; sprintId?: string }): Run {
   const project = get<Project>("projects", projectId);
   if (!project) throw new Error("Projet introuvable");
   if (activeRunFor(chainKey(projectId))) throw new Error("Une chaîne est déjà en cours sur ce projet");
-  const order = chainOrder(projectTasks(projectId));
+  const scope = projectTasks(projectId).filter((t) => !opts.sprintId || t.sprint_id === opts.sprintId);
+  const order = chainOrder(scope);
   if (!order.length) throw new Error("Aucune tâche à lancer : tout est terminé");
   const missing = order.filter((t) => !t.assignee_id);
   if (missing.length) throw new Error(`Assigne d'abord : ${missing.map((t) => `« ${t.title} »`).join(", ")}`);

@@ -290,6 +290,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         temperature: agent.temperature,
         think: agent.think,
         agentId: agent.id,
+        projectId: p.ctx.projectId || null,
         signal,
         onText: (text) => emit({ type: "text", callId, text }),
         onReasoning: (text) => emit({ type: "reasoning", callId, text }),

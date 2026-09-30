@@ -103,6 +103,13 @@ const fmtTask = (t: Task, team: Agent[]) => {
   return `#${t.id} [${t.status}] ${t.title}${who ? ` → ${who.name}` : ""}${t.priority !== "normal" ? ` (priorité ${t.priority})` : ""}${deps}`;
 };
 
+const POINTS = [1, 2, 3, 5, 8, 13];
+/** Snap an estimate to the nearest story-point value (0 = not estimated). */
+export const toPoints = (v: unknown) => {
+  const n = Number(v);
+  return n > 0 ? POINTS.reduce((best, p) => (Math.abs(p - n) < Math.abs(best - n) ? p : best), 1) : 0;
+};
+
 /** Resolve card references given by a model: ids (with or without #) or titles. */
 function resolveCards(refs: unknown, projectId: string): string[] {
   const list0 = Array.isArray(refs) ? refs : typeof refs === "string" ? refs.split(",") : [];
@@ -224,6 +231,7 @@ export const TOOL_GROUPS: Group[] = [
             owner: str(`responsable affiché sur la carte (${ctx.team.map((m) => m.name).join(", ")})`),
             priority: { type: "string", enum: ["low", "normal", "high"] },
             depends_on: { type: "array", items: { type: "string" }, description: "cartes à terminer avant celle-ci (identifiants ou titres)" },
+            complexity: { type: "number", description: "complexité en points : 1, 2, 3, 5, 8 ou 13" },
           },
           ["title"],
         ),
@@ -238,6 +246,7 @@ export const TOOL_GROUPS: Group[] = [
             created_by: ctx.agent.id,
             notes: [],
             depends_on: resolveCards(a.depends_on, ctx.projectId),
+            complexity: toPoints(a.complexity),
           });
           return `Tâche créée : ${fmtTask(t, ctx.team)}`;
         },

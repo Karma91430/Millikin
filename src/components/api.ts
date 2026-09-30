@@ -69,6 +69,8 @@ export type Task = {
   evaluation: Evaluation | null;
   trace: Trace | null;
   depends_on: string[];
+  complexity: number;
+  sprint_id: string;
   title: string;
   description: string;
   status: "todo" | "doing" | "review" | "done";
@@ -78,6 +80,15 @@ export type Task = {
   notes: { at: number; by: string; text: string }[];
   created_at: number;
   updated_at: number;
+};
+export type Sprint = {
+  id: string;
+  project_id: string;
+  name: string;
+  goal: string;
+  start_date: string;
+  end_date: string;
+  status: "planned" | "active" | "done";
 };
 export type RunInfo = {
   id: string;
