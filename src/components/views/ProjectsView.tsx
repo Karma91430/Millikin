@@ -36,6 +36,7 @@ import { useRunTrace } from "../useRunTrace";
 
 const COLUMNS: { id: Task["status"]; label: string; color: string }[] = [
   { id: "todo", label: "À faire", color: "#94a3b8" },
+  { id: "retry", label: "À relancer", color: "#f43f5e" },
   { id: "doing", label: "En cours", color: "#f59e0b" },
   { id: "review", label: "En revue", color: "#8b5cf6" },
   { id: "done", label: "Terminé", color: "#10b981" },
@@ -522,7 +523,7 @@ function Overview({
             return n ? <div key={c.id} style={{ width: `${(n / tasks.length) * 100}%`, background: c.color }} title={`${c.label} : ${n}`} /> : null;
           })}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           {COLUMNS.map((c) => (
             <button key={c.id} onClick={() => onTab("tasks")} className="rounded-lg border border-line bg-surface-2 p-3 text-left hover:border-line-strong">
               <div className="flex items-center gap-1.5 text-xs text-fg-muted">
@@ -752,7 +753,7 @@ function Board({
           }
         }}
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-6 pb-6 pt-3 md:grid-cols-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-6 pb-6 pt-3 md:grid-cols-5">
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => inFilter(t) && statusOf(t) === col.id);
           return (
@@ -787,13 +788,13 @@ function Board({
                         {!isRunning && t.status !== "done" && !blockedBy.length && (
                           <button
                             onClick={(e) => (e.stopPropagation(), launch(t))}
-                            title={who ? `Lancer : ${who.name} réalise la tâche` : "Assigne d'abord la tâche à un agent"}
+                            title={who ? `${t.status === "retry" ? "Relancer" : "Lancer"} : ${who.name} réalise la tâche` : "Assigne d'abord la tâche à un agent"}
                             className={cx(
                               "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
                               who ? "bg-accent/15 text-accent hover:bg-accent/30" : "cursor-not-allowed text-fg-subtle",
                             )}
                           >
-                            <Play size={12} fill="currentColor" />
+                            {t.status === "retry" ? <RotateCcw size={12} /> : <Play size={12} fill="currentColor" />}
                           </button>
                         )}
                         {isRunning && <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin text-accent" />}
@@ -801,6 +802,7 @@ function Board({
                       {phaseLabel && <div className="mt-1 text-[11px] text-accent">{phaseLabel}</div>}
                       {!phaseLabel && t.description && <div className="mt-1 line-clamp-2 text-xs text-fg-muted">{t.description}</div>}
                       {t.evaluation && !isRunning && <div className="mt-1.5 line-clamp-2 text-[11px] text-fg-muted">💬 {t.evaluation.comment}</div>}
+                      {t.status === "retry" && !isRunning && t.notes?.at(-1)?.text.startsWith("⚠️") && <div className="mt-1.5 line-clamp-2 text-[11px] text-rose-400">{t.notes.at(-1)!.text}</div>}
                       {t.depends_on?.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {t.depends_on.map((id) => {
@@ -938,7 +940,7 @@ function TaskEditor({
                   onLaunch(cur);
                 }}
               >
-                {cur.evaluation?.verdict === "a_corriger" ? <RotateCcw size={13} /> : <Play size={13} />} {cur.evaluation?.verdict === "a_corriger" ? "Relancer" : "Lancer"}
+                {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? <RotateCcw size={13} /> : <Play size={13} />} {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? "Relancer" : "Lancer"}
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>

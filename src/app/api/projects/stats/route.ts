@@ -34,7 +34,7 @@ export async function GET(req: Request) {
     byAgent,
     tasks: {
       total: tasks.length,
-      byStatus: Object.fromEntries(["todo", "doing", "review", "done"].map((s) => [s, tasks.filter((t) => t.status === s).length])),
+      byStatus: Object.fromEntries(["todo", "retry", "doing", "review", "done"].map((s) => [s, tasks.filter((t) => t.status === s).length])),
       points: points(tasks),
       pointsDone: points(tasks.filter((t) => t.status === "done")),
       avgScore: evaluated.length ? evaluated.reduce((n, t) => n + (t.evaluation?.score ?? 0), 0) / evaluated.length : null,

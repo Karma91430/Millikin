@@ -76,7 +76,7 @@ export type Task = {
   sprint_id: string;
   title: string;
   description: string;
-  status: "todo" | "doing" | "review" | "done";
+  status: "todo" | "retry" | "doing" | "review" | "done";
   priority: "low" | "normal" | "high";
   assignee_id: string;
   created_by: string;
