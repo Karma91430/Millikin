@@ -176,6 +176,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   workspace_dir: path.join(process.cwd(), "workspace"),
   command_timeout: "60",
   max_reasoning: "12000",
+  web_fallback: "on",
 };
 
 export function getSettings(): Record<string, string> {

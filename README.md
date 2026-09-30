@@ -41,7 +41,7 @@ Think of it as **LiteLLM and an agent workspace fused together**, with a Kanban 
 | ▶️ **Tasks that run themselves** | Launch a card: the assignee does the work, a first contact **reviews** it (verdict, score, comment) and the status updates automatically. |
 | ⛓️ **Dependencies & chains** | Tasks depend on others; their results and a shared **decision log** flow to the next agent. Run a whole chain in dependency order. |
 | 🏃 **Planning & sprints** | One click: the project lead, with the tech lead, breaks the project into **estimated tasks** (story points, priority, assignee) grouped into **sprints**. |
-| 👤 **Agent profiles** | 37 ready-made profiles in 7 categories, your own profiles, and AI-generated agents or whole teams from a description. |
+| 👤 **Agent profiles** | 34 ready-made profiles in 7 categories, each with the tools its role needs; your own profiles; AI-generated agents or whole teams. |
 | 📚 **RAG, skills, MCP** | Local embeddings over your docs (txt, md, pdf, code), reusable Markdown skills, and any **MCP** server (stdio or HTTP). |
 | 🛠️ **Agent tools** | Web search (self-hosted SearXNG), page reading, sandboxed file read/write per project, optional shell commands, board management. |
 | ⏳ **Background runs** | Local answers take minutes: runs keep going when you switch screens or reload, with an “answer ready” notification. |
@@ -83,7 +83,7 @@ Then: **Projets → Nouveau projet** from a team template, and start talking to 
 ### Model tips
 
 - An **8B model with tool support** (e.g. `qwen3:8b`) is a good baseline on a 16–18 GB machine; a full team cycle takes minutes.
-- Give each agent **3 to 5 tools**: small models pick far better among a few clearly named tools.
+- Give each agent **the tools its role needs, and no more**: built-in profiles come with a sensible kit, and **Réglages → Diagnostic** tells you which tools can run on your machine.
 - Turn **thinking** on for leads (better orchestration) and off for specialists (faster). Runaway reasoning is capped automatically.
 - For better reviews, give first contacts a larger model — on this machine or another Ollama host on your network.
 
@@ -92,9 +92,11 @@ Then: **Projets → Nouveau projet** from a team template, and start talking to 
 | Tool | Notes |
 |---|---|
 | `ask_agent` | Delegation along the team links, given automatically. |
-| `web_search`, `fetch_url` | SearXNG search and page reading. |
+| `web_search` | SearXNG search, with an optional DuckDuckGo fallback when SearXNG is unreachable. |
+| `fetch_url` | Reads a URL: readable text from HTML, pretty JSON, plain text or PDF (size-capped). |
+| `http_request` | Calls an API (GET/POST/PUT/PATCH/DELETE, headers, JSON body). Disabled during task reviews. |
 | `list_files`, `read_file`, `write_file`, `edit_file` | Confined to the project folder (paths escaping it, symlinks included, are refused). |
-| `run_command` | Shell in the project folder with a timeout. **Off by default.** |
+| `run_command` | Shell in the project folder (or a sub-folder) with a timeout. Opt-in per agent. |
 | `board_list`, `board_add_card`, `board_update_card` | Kanban board, with dependencies and story points. |
 | `record_decision` | First contacts log decisions in `docs/DECISIONS.md`, which every project agent receives. |
 | `search_knowledge` | RAG search; the best passages are also injected automatically. |

@@ -90,7 +90,7 @@ Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREM
           team,
           phase: "free",
           consultOnly: true, // plans only: no delegation, the co-leads are consulted automatically
-          excludeTools: ["board_add_card", "board_update_card", "write_file", "edit_file", "run_command", "record_decision"],
+          excludeTools: ["board_add_card", "board_update_card", "write_file", "edit_file", "run_command", "http_request", "record_decision"],
           emit,
           signal,
           ctx,

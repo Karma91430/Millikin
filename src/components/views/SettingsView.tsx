@@ -33,6 +33,7 @@ function SettingsForm({ meta, initial }: { meta: Meta; initial: Record<string, s
         }
       />
       <div className="grid max-w-4xl gap-4 p-6 md:grid-cols-2">
+        <Diagnostic />
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-sm font-semibold">Modèles</div>
           <Field label="Modèle par défaut" hint="Utilisé par les agents sans modèle défini, et pour générer agents, équipes et skills.">
@@ -89,6 +90,12 @@ function SettingsForm({ meta, initial }: { meta: Meta; initial: Record<string, s
           <Field label="URL SearXNG" hint="Moteur de recherche local utilisé par l'outil web_search.">
             <Input value={v.searxng_url} onChange={(e) => set("searxng_url", e.target.value)} />
           </Field>
+          <Field label="Recherche de secours" hint="Si SearXNG ne répond pas, la requête est envoyée à DuckDuckGo (seule la requête sort de ta machine).">
+            <Select value={v.web_fallback} onChange={(e) => set("web_fallback", e.target.value)}>
+              <option value="on">Activée (DuckDuckGo)</option>
+              <option value="off">Désactivée</option>
+            </Select>
+          </Field>
           <Field label="Dossier des espaces de travail" hint="Chaque équipe y a son sous-dossier, sauf si un dossier précis est défini sur l'équipe.">
             <Input className="font-mono text-xs" value={v.workspace_dir} onChange={(e) => set("workspace_dir", e.target.value)} />
           </Field>
@@ -105,5 +112,50 @@ function SettingsForm({ meta, initial }: { meta: Meta; initial: Record<string, s
         </Card>
       </div>
     </div>
+  );
+}
+
+const CHECK_LABELS: Record<string, [string, string]> = {
+  searxng: ["SearXNG", "Recherche web principale"],
+  fallback: ["Secours DuckDuckGo", "Recherche si SearXNG est indisponible"],
+  ollama: ["Ollama", "Modèles"],
+  node: ["Node.js", "Scripts JS/TS via run_command"],
+  python: ["Python", "Scripts Python via run_command"],
+  git: ["Git", "Versionnage via run_command"],
+};
+
+/** Can the agent tools actually work on this machine? */
+function Diagnostic() {
+  const h = useData<{ checks: Record<string, { ok: boolean; detail: string }> }>("/api/tools/health");
+  return (
+    <Card className="flex flex-col gap-2 p-4 md:col-span-2">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold">Diagnostic des outils</div>
+        <Button size="sm" variant="ghost" onClick={h.reload}>
+          Relancer
+        </Button>
+      </div>
+      {!h.data ? (
+        <div className="text-sm text-fg-muted">{h.error ?? "Vérification…"}</div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {Object.entries(CHECK_LABELS).map(([key, [name, use]]) => {
+            const c = h.data!.checks[key];
+            return (
+              <div key={key} className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2">
+                <span className={c?.ok ? "text-emerald-400" : "text-red-400"}>{c?.ok ? "✓" : "✗"}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{name}</span>
+                  <span className="block truncate text-[11px] text-fg-muted" title={c?.detail}>
+                    {c?.detail ?? "—"}
+                  </span>
+                  <span className="block text-[11px] text-fg-subtle">{use}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
   );
 }
