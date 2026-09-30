@@ -1,26 +1,234 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface-0: #0b0d12;
+  --surface-1: #11141b;
+  --surface-2: #171b24;
+  --surface-3: #1f2430;
+  --line: #242a36;
+  --line-strong: #353d4d;
+  --fg: #e6e8ee;
+  --fg-muted: #9aa3b5;
+  --fg-subtle: #697287;
+  --accent: #7c6cf6;
+  --accent-strong: #6a58f0;
+}
+
+:root[data-theme="light"] {
+  --surface-0: #f7f8fa;
+  --surface-1: #ffffff;
+  --surface-2: #f1f3f7;
+  --surface-3: #e7eaf0;
+  --line: #e2e6ee;
+  --line-strong: #cdd3de;
+  --fg: #151822;
+  --fg-muted: #5a6376;
+  --fg-subtle: #8a93a6;
+  --accent: #6a58f0;
+  --accent-strong: #5846e0;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
+  background: var(--surface-0);
+  color: var(--fg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ---------- markdown ---------- */
+.md {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.md > * + * {
+  margin-top: 0.6em;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1em;
+}
+.md h1 {
+  font-size: 1.15rem;
+}
+.md h2 {
+  font-size: 1.05rem;
+}
+.md h3,
+.md h4 {
+  font-size: 0.95rem;
+}
+.md ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.md ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.md li + li {
+  margin-top: 0.2em;
+}
+.md a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.md strong {
+  font-weight: 600;
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.md pre {
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.78rem;
+}
+.md blockquote {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 0.75rem;
+  color: var(--fg-muted);
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  display: block;
+  overflow-x: auto;
+}
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 0.3rem 0.5rem;
+}
+.md hr {
+  border-color: var(--line);
+}
+
+/* ---------- graph ---------- */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke: var(--line-strong);
+  --xy-controls-button-background-color: var(--surface-2);
+  --xy-controls-button-background-color-hover: var(--surface-3);
+  --xy-controls-button-color: var(--fg-muted);
+  --xy-controls-button-border-color: var(--line);
+  --xy-attribution-background-color: transparent;
+}
+.react-flow__handle {
+  opacity: 0;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.edge-active {
+  stroke-dasharray: 6 6;
+  animation: dash 0.6s linear infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.caret::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: blink 1s steps(1) infinite;
+  color: var(--accent);
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--ring);
+  }
+  70% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.pulse {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop {
+  animation: pop 0.25s ease-out;
+}
+
+@keyframes dots {
+  0%,
+  20% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+.dots span {
+  animation: dots 1.2s infinite;
+}
+.dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dots span:nth-child(3) {
+  animation-delay: 0.4s;
 }
