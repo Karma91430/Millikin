@@ -132,25 +132,185 @@ function cosine(a: ArrayLike<number>, b: ArrayLike<number>) {
 
 export type Hit = { text: string; doc: string; docId: string; kb: string; tags: string[]; score: number };
 
-/** Semantic search over knowledge bases, optionally restricted to documents carrying one of `tags`. */
-export async function search(kbIds: string[], query: string, k = 4, opts: { tags?: string[] } = {}): Promise<Hit[]> {
-  if (!kbIds.length || !query.trim()) return [];
+// ---------------------------------------------------------------- search pipeline
+
+export type Rerank = "none" | "mmr" | "llm";
+export type SearchOptions = {
+  tags?: string[];
+  /** Blend a keyword (BM25) score with the vector score, for exact terms. */
+  hybrid?: boolean;
+  /** Weight of the vector score in hybrid mode (0–1). */
+  alpha?: number;
+  /** Re-order the best candidates: MMR (diversity) or the local LLM (relevance). */
+  rerank?: Rerank;
+  /** MMR trade-off between relevance (1) and diversity (0). */
+  lambda?: number;
+  /** How many candidates enter the pipeline before the final top-k. */
+  candidates?: number;
+};
+export type Candidate = { id: string; docId: string; doc: string; kb: string; tags: string[]; text: string; vector: number; lexical?: number; hybrid?: number; mmr?: number; llm?: number };
+export type Stage = { id: "vector" | "hybrid" | "mmr" | "llm" | "final"; label: string; detail: string; order: string[]; scores: Record<string, number>; ms: number };
+export type Pipeline = { query: string; candidates: Candidate[]; stages: Stage[]; final: string[]; total: number };
+
+const STOP = new Set(
+  "les des une un le la de du et en est pour que qui dans par sur au aux avec son ses sa ce cette ces pas plus ne se il elle ils on nous vous leur leurs mais ou donc car comme tout tous toute être avoir fait faire the and for with that this from are was were you your have has not but can will its into".split(" "),
+);
+const tokens = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 2 && !STOP.has(t));
+
+/** BM25 over the given corpus, returning a scorer for its documents. */
+function bm25(corpus: string[], query: string, k1 = 1.4, b = 0.75) {
+  const docs = corpus.map(tokens);
+  const avgdl = docs.reduce((n, d) => n + d.length, 0) / (docs.length || 1);
+  const q = [...new Set(tokens(query))];
+  const df = new Map(q.map((t) => [t, docs.filter((d) => d.includes(t)).length]));
+  return (i: number) => {
+    const d = docs[i];
+    let score = 0;
+    for (const t of q) {
+      const tf = d.filter((x) => x === t).length;
+      if (!tf) continue;
+      const idf = Math.log(1 + (docs.length - df.get(t)! + 0.5) / (df.get(t)! + 0.5));
+      score += (idf * tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.length) / avgdl));
+    }
+    return score;
+  };
+}
+
+const normalize = (xs: number[]) => {
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  return xs.map((x) => (max > min ? (x - min) / (max - min) : max > 0 ? 1 : 0));
+};
+
+/** Ask the local model to grade each candidate's relevance (0–10) in one call. */
+async function llmScores(query: string, cands: { id: string; text: string }[]): Promise<Record<string, number>> {
+  const list = cands.map((c, i) => `[P${i + 1}] ${c.text.replace(/\s+/g, " ").slice(0, 500)}`).join("\n\n");
+  const raw = await complete({
+    json: true,
+    temperature: 0,
+    source: "rerank",
+    messages: [
+      {
+        role: "system",
+        content: 'Tu évalues la pertinence de passages pour répondre à une question. Réponds UNIQUEMENT en JSON : {"scores": {"P1": note, "P2": note, …}} avec une note de 0 (hors sujet) à 10 (répond directement à la question).',
+      },
+      { role: "user", content: `Question : ${query}\n\nPassages :\n${list}` },
+    ],
+  });
+  const m = raw.match(/\{[\s\S]*\}/);
+  const parsed = m ? ((JSON.parse(m[0]) as { scores?: Record<string, unknown> }).scores ?? {}) : {};
+  return Object.fromEntries(cands.map((c, i) => [c.id, Math.max(0, Math.min(10, Number(parsed[`P${i + 1}`]) || 0))]));
+}
+
+/**
+ * Instrumented retrieval: vector similarity, optional hybrid keyword blend, optional reranking,
+ * then top-k. Every stage reports its ordering and scores so the UI can replay it.
+ */
+export async function searchPipeline(kbIds: string[], query: string, k = 4, opts: SearchOptions = {}): Promise<Pipeline> {
+  const empty: Pipeline = { query, candidates: [], stages: [], final: [], total: 0 };
+  if (!kbIds.length || !query.trim()) return empty;
+  const stages: Stage[] = [];
+  let t = Date.now();
   const q = await embedQuery(query);
   const want = normTags(opts.tags ?? []);
-  const rows = db()
-    .prepare(
-      `SELECT c.text, c.embedding, d.id AS doc_id, d.name AS doc, d.tags AS tags, k.name AS kb FROM kb_chunks c
-       JOIN kb_docs d ON d.id = c.doc_id JOIN kbs k ON k.id = c.kb_id
-       WHERE c.kb_id IN (${kbIds.map(() => "?").join(",")})`,
-    )
-    .all(...kbIds) as { text: string; embedding: Uint8Array; doc_id: string; doc: string; tags: string; kb: string }[];
-  const hits: Hit[] = [];
-  for (const r of rows) {
-    const tags = parseTags(r.tags);
-    if (want.length && !tags.some((t) => want.includes(t))) continue;
-    hits.push({ text: r.text, doc: r.doc, docId: r.doc_id, kb: r.kb, tags, score: cosine(vec(r.embedding), q) });
+  const rows = (
+    db()
+      .prepare(
+        `SELECT c.id, c.text, c.embedding, d.id AS doc_id, d.name AS doc, d.tags AS tags, k.name AS kb FROM kb_chunks c
+         JOIN kb_docs d ON d.id = c.doc_id JOIN kbs k ON k.id = c.kb_id
+         WHERE c.kb_id IN (${kbIds.map(() => "?").join(",")})`,
+      )
+      .all(...kbIds) as { id: string; text: string; embedding: Uint8Array; doc_id: string; doc: string; tags: string; kb: string }[]
+  )
+    .map((r) => ({ ...r, tagList: parseTags(r.tags) }))
+    .filter((r) => !want.length || r.tagList.some((x) => want.includes(x)));
+  if (!rows.length) return empty;
+
+  // 1. Vector similarity over the whole (filtered) corpus, keep the best candidates.
+  const n = Math.max(k, Math.min(40, opts.candidates ?? 16));
+  const embs = new Map(rows.map((r) => [r.id, vec(r.embedding)]));
+  const scored = rows.map((r) => ({ r, vector: cosine(embs.get(r.id)!, q) })).sort((a, b) => b.vector - a.vector);
+  const pool = scored.slice(0, n);
+  const cands: Candidate[] = pool.map(({ r, vector }) => ({ id: r.id, docId: r.doc_id, doc: r.doc, kb: r.kb, tags: r.tagList, text: r.text, vector }));
+  const byId = new Map(cands.map((c) => [c.id, c]));
+  const score = (key: "vector" | "hybrid" | "mmr" | "llm") => Object.fromEntries(cands.map((c) => [c.id, (c[key] as number | undefined) ?? 0]));
+  stages.push({ id: "vector", label: "Recherche vectorielle", detail: `${rows.length} passages comparés, ${cands.length} candidats retenus`, order: cands.map((c) => c.id), scores: score("vector"), ms: Date.now() - t });
+  let order = cands.map((c) => c.id);
+  let current: "vector" | "hybrid" | "mmr" | "llm" = "vector";
+
+  // 2. Hybrid: BM25 over the corpus, blended with the vector score.
+  if (opts.hybrid) {
+    t = Date.now();
+    const index = new Map(rows.map((r, i) => [r.id, i]));
+    const scorer = bm25(rows.map((r) => `${r.doc} ${r.text}`), query);
+    const lex = cands.map((c) => scorer(index.get(c.id)!));
+    const nl = normalize(lex);
+    const nv = normalize(cands.map((c) => c.vector));
+    const alpha = Math.min(1, Math.max(0, opts.alpha ?? 0.6));
+    cands.forEach((c, i) => {
+      c.lexical = lex[i];
+      c.hybrid = alpha * nv[i] + (1 - alpha) * nl[i];
+    });
+    order = [...cands].sort((a, b) => b.hybrid! - a.hybrid!).map((c) => c.id);
+    current = "hybrid";
+    stages.push({ id: "hybrid", label: "Hybride (mots-clés)", detail: `score = ${alpha.toFixed(2)} × vecteur + ${(1 - alpha).toFixed(2)} × BM25`, order, scores: score("hybrid"), ms: Date.now() - t });
   }
-  return hits.sort((a, b) => b.score - a.score).slice(0, k);
+
+  // 3. Reranking.
+  if (opts.rerank === "mmr") {
+    t = Date.now();
+    const lambda = Math.min(1, Math.max(0, opts.lambda ?? 0.7));
+    const rels = normalize(order.map((id) => (byId.get(id)![current] as number) ?? 0));
+    const relN = new Map(order.map((id, i) => [id, rels[i]]));
+    const left = [...order];
+    const picked: string[] = [];
+    while (left.length) {
+      let best = left[0];
+      let bestScore = -Infinity;
+      for (const id of left) {
+        const div = picked.length ? Math.max(...picked.map((p) => cosine(embs.get(id)!, embs.get(p)!))) : 0;
+        const s = lambda * relN.get(id)! - (1 - lambda) * div;
+        if (s > bestScore) {
+          bestScore = s;
+          best = id;
+        }
+      }
+      byId.get(best)!.mmr = bestScore;
+      picked.push(best);
+      left.splice(left.indexOf(best), 1);
+    }
+    order = picked;
+    current = "mmr";
+    stages.push({ id: "mmr", label: "Reranking MMR", detail: `diversité : λ = ${lambda.toFixed(2)} (1 = pertinence seule)`, order, scores: score("mmr"), ms: Date.now() - t });
+  } else if (opts.rerank === "llm") {
+    t = Date.now();
+    const top = order.slice(0, Math.min(8, order.length));
+    const grades = await llmScores(query, top.map((id) => ({ id, text: byId.get(id)!.text })));
+    for (const id of top) byId.get(id)!.llm = grades[id];
+    order = [...top].sort((a, b) => (grades[b] ?? 0) - (grades[a] ?? 0) || order.indexOf(a) - order.indexOf(b)).concat(order.slice(top.length));
+    current = "llm";
+    stages.push({ id: "llm", label: "Reranking LLM", detail: `le modèle note les ${top.length} meilleurs candidats de 0 à 10`, order, scores: score("llm"), ms: Date.now() - t });
+  }
+
+  const final = order.slice(0, k);
+  stages.push({ id: "final", label: `Top ${k}`, detail: "passages transmis à l'agent", order: final, scores: score(current), ms: 0 });
+  return { query, candidates: cands, stages, final, total: rows.length };
+}
+
+/** Search used by agents: the pipeline's final passages. */
+export async function search(kbIds: string[], query: string, k = 4, opts: SearchOptions = {}): Promise<Hit[]> {
+  const p = await searchPipeline(kbIds, query, k, opts);
+  const byId = new Map(p.candidates.map((c) => [c.id, c]));
+  return p.final.map((id) => {
+    const c = byId.get(id)!;
+    return { text: c.text, doc: c.doc, docId: c.docId, kb: c.kb, tags: c.tags, score: c.vector };
+  });
 }
 
 /** Documents as graph nodes plus similarity links (mean chunk embeddings, top 2 neighbours above a threshold). */

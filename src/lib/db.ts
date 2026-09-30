@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { seed } from "./seed";
-import type { ProjectResources } from "./resources";
+import type { AgentRag, ProjectResources } from "./resources";
 import { specFromTeam, type TeamSpec } from "./team";
 
 const DATA_DIR = process.env.MILLIKIN_DATA_DIR || path.join(process.cwd(), "data");
@@ -88,6 +88,7 @@ const COLUMNS: [string, string, string][] = [
   ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
   ["projects", "resources", "TEXT DEFAULT '{}'"],
   ["conversations", "kind", "TEXT DEFAULT ''"],
+  ["agents", "rag", "TEXT DEFAULT '{}'"],
 ];
 
 const slugify = (s: string) =>
@@ -201,9 +202,9 @@ type EntityDef = { table: string; json: string[]; bool: string[]; cols: string[]
 export const ENTITIES: Record<string, EntityDef> = {
   agents: {
     table: "agents",
-    json: ["tools", "skill_ids", "kb_ids", "mcp_ids"],
+    json: ["tools", "skill_ids", "kb_ids", "mcp_ids", "rag"],
     bool: [],
-    cols: ["name", "role", "emoji", "color", "system_prompt", "model", "temperature", "think", "tools", "skill_ids", "kb_ids", "mcp_ids"],
+    cols: ["name", "role", "emoji", "color", "system_prompt", "model", "temperature", "think", "tools", "skill_ids", "kb_ids", "mcp_ids", "rag"],
     order: "created_at",
   },
   teams: {
@@ -324,6 +325,8 @@ export type Agent = {
   skill_ids: string[];
   kb_ids: string[];
   mcp_ids: string[];
+  /** Filters and mode for the agent's own knowledge bases (kb_ids). */
+  rag: Partial<AgentRag>;
 };
 export type Team = {
   id: string;

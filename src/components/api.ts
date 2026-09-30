@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ProjectResources } from "@/lib/resources";
+import type { AgentRag, ProjectResources } from "@/lib/resources";
 import type { TeamSpec } from "@/lib/team";
 export type { ProjectResources } from "@/lib/resources";
 import type { Trace } from "@/lib/trace";
@@ -21,6 +21,7 @@ export type Agent = {
   skill_ids: string[];
   kb_ids: string[];
   mcp_ids: string[];
+  rag: Partial<AgentRag>;
 };
 export type Profile = {
   id: string;

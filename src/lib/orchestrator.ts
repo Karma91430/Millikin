@@ -3,7 +3,7 @@ import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 import { callMcpTool, listMcpTools } from "./mcp";
 import { search, tagCounts } from "./rag";
-import { normalizeResources } from "./resources";
+import { normalizeAgentRag, normalizeResources } from "./resources";
 import { reportsOf, type TeamSpec } from "./team";
 import { buildTools, type ToolContext } from "./tools";
 import type { TraceEvent } from "./trace";
@@ -231,12 +231,37 @@ export async function runAgent(p: RunParams): Promise<string> {
     // Project resources: knowledge and MCP servers are granted per agent in the project's team settings.
     const project = p.ctx.projectId ? get<Project>("projects", p.ctx.projectId) : undefined;
     const res = normalizeResources(project?.resources);
-    const rag = res.rag.kb_ids.length && res.rag.agent_ids.includes(agent.id) ? res.rag : null;
-    if (rag && !excluded.has("search_knowledge")) {
-      const tagsInUse = tagCounts(rag.kb_ids).map((t) => t.tag).filter((t) => !rag.tags.length || rag.tags.includes(t));
-      if (rag.mode === "auto") {
+    // Knowledge sources: the agent's own bases (everywhere, incl. direct chats) + the project's, if granted.
+    type Source = { kb_ids: string[]; tags: string[]; mode: "auto" | "tool"; top_k: number; hybrid: boolean; rerank: "none" | "mmr" | "llm" };
+    const sources: Source[] = [];
+    if (agent.kb_ids?.length) sources.push({ kb_ids: agent.kb_ids, ...normalizeAgentRag(agent.rag) });
+    if (res.rag.kb_ids.length && res.rag.agent_ids.includes(agent.id)) sources.push(res.rag);
+    if (sources.length && !excluded.has("search_knowledge")) {
+      const searchAll = async (query: string, onlyTag: string | null, auto: boolean) => {
+        const hits = (
+          await Promise.all(
+            sources
+              .filter((src) => !auto || src.mode === "auto")
+              .map((src) =>
+                search(src.kb_ids, query, auto ? src.top_k : Math.max(5, src.top_k), {
+                  tags: onlyTag ? [onlyTag] : src.tags,
+                  hybrid: src.hybrid,
+                  rerank: src.rerank,
+                }),
+              ),
+          )
+        ).flat();
+        // Merge sources: keep each passage once, best first.
+        const seen = new Set<string>();
+        return hits
+          .sort((a, b) => b.score - a.score)
+          .filter((h) => (seen.has(h.text) ? false : (seen.add(h.text), true)))
+          .slice(0, auto ? Math.max(...sources.map((x) => x.top_k)) : 6);
+      };
+      const tagsInUse = [...new Set(sources.flatMap((src) => tagCounts(src.kb_ids).map((t) => t.tag).filter((t) => !src.tags.length || src.tags.includes(t))))];
+      if (sources.some((src) => src.mode === "auto")) {
         try {
-          const hits = await search(rag.kb_ids, p.input, rag.top_k, { tags: rag.tags });
+          const hits = await searchAll(p.input, null, true);
           if (hits.length)
             dynamic.push("## Extraits de la base de connaissances (cite la source)\n" + hits.map((h) => `[${h.doc}${h.tags.length ? ` · ${h.tags.join(", ")}` : ""}] (score ${h.score.toFixed(2)})\n${h.text}`).join("\n---\n"));
         } catch (e) {
@@ -247,7 +272,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         type: "function",
         function: {
           name: "search_knowledge",
-          description: "Rechercher dans la base de connaissances interne du projet (documents indexés). Renvoie les passages les plus pertinents avec leur source.",
+          description: "Rechercher dans la base de connaissances interne (documents indexés). Renvoie les passages les plus pertinents avec leur source.",
           parameters: {
             type: "object",
             properties: {
@@ -259,8 +284,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         },
       });
       impls.search_knowledge = async (a) => {
-        const tags = a.tag && tagsInUse.includes(String(a.tag)) ? [String(a.tag)] : rag.tags;
-        const hits = await search(rag.kb_ids, String(a.query ?? ""), Math.max(5, rag.top_k), { tags });
+        const hits = await searchAll(String(a.query ?? ""), a.tag && tagsInUse.includes(String(a.tag)) ? String(a.tag) : null, false);
         return hits.length ? hits.map((h) => `[${h.doc}${h.tags.length ? ` · ${h.tags.join(", ")}` : ""}] ${h.text}`).join("\n---\n") : "Aucun passage pertinent.";
       };
     }
