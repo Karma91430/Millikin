@@ -1,7 +1,7 @@
 "use client";
 
 import { forceCollide, forceLink, forceManyBody, forceRadial, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from "d3-force";
-import { ArrowDown, ArrowUp, Pause, Play, RotateCcw, Search, SkipBack, SkipForward, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pause, Play, RotateCcw, Search, SkipBack, SkipForward, Tags, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, useData, type Kb } from "./api";
 import { Badge, Button, cx, Input, Select } from "./ui";
@@ -40,8 +40,11 @@ const STARS = Array.from({ length: 140 }, (_, i) => {
 function useLayout(g?: Graph) {
   const [nodes, setNodes] = useState<SimNode[]>([]);
   const [links, setLinks] = useState<SimLink[]>([]);
+  const [settled, setSettled] = useState(0);
   useEffect(() => {
     if (!g) return;
+    // The ring grows with the corpus so constellations keep their distance.
+    const R = Math.round(280 * Math.max(1, Math.sqrt(g.docs.length / 14)));
     const groups = new Map<string, GDoc[]>();
     for (const d of g.docs) groups.set(d.tags[0] ?? "", [...(groups.get(d.tags[0] ?? "") ?? []), d]);
     const ns: SimNode[] = [{ id: "brain", kind: "brain", tag: "", r: 46, fx: 0, fy: 0 }];
@@ -49,7 +52,7 @@ function useLayout(g?: Graph) {
     const keys = [...groups.keys()];
     keys.forEach((key, i) => {
       const a = (i / Math.max(1, keys.length)) * Math.PI * 2 - Math.PI / 2;
-      const hub: SimNode = { id: `hub:${key || "_"}`, kind: "hub", tag: key, r: 18, count: groups.get(key)!.length, x: Math.cos(a) * 280, y: Math.sin(a) * 280 };
+      const hub: SimNode = { id: `hub:${key || "_"}`, kind: "hub", tag: key, r: 18, count: groups.get(key)!.length, x: Math.cos(a) * R, y: Math.sin(a) * R };
       ns.push(hub);
       ls.push({ source: "brain", target: hub.id, kind: "hub" });
       for (const d of groups.get(key)!) {
@@ -63,17 +66,23 @@ function useLayout(g?: Graph) {
         "link",
         forceLink<SimNode, SimLink>(ls)
           .id((d) => d.id)
-          .distance((l) => (l.kind === "hub" ? 280 : l.kind === "doc" ? 70 : 110))
+          .distance((l) => (l.kind === "hub" ? R : l.kind === "doc" ? 70 : 110))
           .strength((l) => (l.kind === "hub" ? 0.9 : l.kind === "doc" ? 0.6 : 0.08)),
       )
       .force("charge", forceManyBody<SimNode>().strength((d) => (d.kind === "doc" ? -90 : d.kind === "hub" ? -260 : -600)))
       .force("collide", forceCollide<SimNode>().radius((d) => d.r + 10))
-      .force("ring", forceRadial<SimNode>((d) => (d.kind === "hub" ? 280 : d.kind === "doc" ? 360 : 0), 0, 0).strength((d) => (d.kind === "hub" ? 0.5 : 0.04)))
+      .force("ring", forceRadial<SimNode>((d) => (d.kind === "hub" ? R : d.kind === "doc" ? R + 80 : 0), 0, 0).strength((d) => (d.kind === "hub" ? 0.5 : 0.04)))
       .force("x", forceX(0).strength(0.01))
       .force("y", forceY(0).strength(0.01))
       .alphaDecay(0.035);
     let frame = 0;
+    let early = false;
     sim.on("tick", () => {
+      // Fit the view as soon as the layout is mostly stable, then again when it ends.
+      if (!early && sim.alpha() < 0.15) {
+        early = true;
+        setSettled((n) => n + 1);
+      }
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
@@ -81,13 +90,14 @@ function useLayout(g?: Graph) {
         setLinks([...ls]);
       });
     });
+    sim.on("end", () => setSettled((n) => n + 1));
     if (reduceMotion()) sim.tick(300);
     return () => {
       sim.stop();
       cancelAnimationFrame(frame);
     };
   }, [g]);
-  return { nodes, links };
+  return { nodes, links, settled };
 }
 
 /** Wheel zoom around the cursor and drag-to-pan on the background. */
@@ -125,9 +135,12 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
   const [kbFilter, setKbFilter] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const graph = useData<Graph>(`/api/kb/graph${kbFilter ? `?kbIds=${kbFilter}` : ""}`);
-  const { nodes, links } = useLayout(graph.data);
+  const { nodes, links, settled } = useLayout(graph.data);
   const { view, setView, handlers } = usePanZoom();
   const [hover, setHover] = useState<string | null>(null);
+  // Tag labels stay hidden unless asked for, hovered or filtered: the graph reads as constellations first.
+  const [showTags, setShowTags] = useState(false);
+  const [hoverTag, setHoverTag] = useState<string | null>(null);
   // Scene origin (the brain) sits at the centre of the panel.
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -138,6 +151,23 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  /** Zoom so every node (and its label) fits in the panel; the lab panel is outside the box. */
+  const fit = () => {
+    const docs = nodes.filter((n) => n.x !== undefined);
+    if (!docs.length) return;
+    const xs = docs.flatMap((n) => [n.x! - n.r - 60, n.x! + n.r + 60]);
+    const ys = docs.flatMap((n) => [n.y! - n.r - 30, n.y! + n.r + 34]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const k = Math.min(1.2, Math.max(0.25, Math.min((size.w - 32) / (x1 - x0), (size.h - 100) / (y1 - y0))));
+    setView({ k, x: (-(x0 + x1) / 2) * k, y: (-(y0 + y1) / 2) * k + 20 });
+  };
+  // Fit once the layout settles after loading (manual zoom afterwards is kept).
+  const fitted = useRef(0);
+  useEffect(() => {
+    if (!settled || fitted.current === settled) return;
+    fitted.current = settled;
+    fit();
+  });
 
   // ---- search lab state
   const [q, setQ] = useState("");
@@ -219,6 +249,8 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
     return m;
   }, [nodes]);
 
+  const hoveredDocTag = nodes.find((n) => n.id === hover)?.tag;
+  const tagVisible = (tag: string) => showTags || tagFilter === tag || hoverTag === tag || hoveredDocTag === tag;
   const dimDoc = (n: SimNode) => (!!tagFilter && !n.doc?.tags.includes(tagFilter)) || (!!stage && !docRank.has(n.id));
   const g = graph.data;
   const queryPos = { x: 0, y: -80 };
@@ -236,7 +268,20 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
               </option>
             ))}
           </Select>
-          <div className="flex flex-wrap gap-1">
+          <Button size="sm" variant={showTags ? "primary" : "soft"} onClick={() => setShowTags(!showTags)} title={showTags ? "Masquer les tags" : "Afficher tous les tags"}>
+            <Tags size={13} /> Tags {g?.tags.length ? <span className="opacity-70">{g.tags.length}</span> : null}
+          </Button>
+          {!showTags && tagFilter && (
+            <button
+              onClick={() => setTagFilter(null)}
+              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white"
+              style={{ background: tagColor(tagFilter) }}
+              title="Retirer le filtre"
+            >
+              #{tagFilter} <X size={11} />
+            </button>
+          )}
+          <div className={cx("flex flex-wrap gap-1", !showTags && "hidden")}>
             {(g?.tags ?? []).map((t) => (
               <button
                 key={t.tag}
@@ -250,7 +295,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
           </div>
         </div>
         <div className="absolute bottom-3 left-3 z-10 flex gap-1">
-          <Button size="sm" variant="soft" onClick={() => setView({ x: 0, y: 0, k: 0.75 })} title="Recentrer">
+          <Button size="sm" variant="soft" onClick={fit} title="Ajuster le graphe à l'écran">
             <RotateCcw size={13} />
           </Button>
         </div>
@@ -300,7 +345,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                 ))}
                 {/* nebulae */}
                 {[...clusters].map(([tag, c]) => (
-                  <g key={tag || "_"} opacity={tagFilter && tagFilter !== tag ? 0.25 : 1}>
+                  <g key={tag || "_"} opacity={tagFilter && tagFilter !== tag ? 0.25 : 1} onMouseEnter={() => setHoverTag(tag)} onMouseLeave={() => setHoverTag((h) => (h === tag ? null : h))}>
                     <circle cx={c.x} cy={c.y} r={c.r} fill={`url(#kg-neb-${(tag || "_").replace(/[^a-z0-9]/gi, "_")})`} />
                   </g>
                 ))}
@@ -345,12 +390,16 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                   const count = nodes.filter((n) => n.kind === "doc" && n.tag === tag).length;
                   const label = `#${tag || "sans tag"} · ${count}`;
                   const w = label.length * 7 + 24;
+                  const visible = tagVisible(tag);
                   return (
                     <g
                       key={`lbl-${tag || "_"}`}
                       data-node
                       transform={`translate(${c.x} ${c.y - c.r + 18})`}
-                      opacity={tagFilter && tagFilter !== tag ? 0.3 : 1}
+                      opacity={!visible ? 0 : tagFilter && tagFilter !== tag ? 0.3 : 1}
+                      style={{ transition: "opacity .25s", pointerEvents: visible ? "auto" : "none" }}
+                      onMouseEnter={() => setHoverTag(tag)}
+                      onMouseLeave={() => setHoverTag((h) => (h === tag ? null : h))}
                       className="cursor-pointer"
                       onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
                     >
@@ -393,9 +442,11 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                               </text>
                             </g>
                           )}
-                          <text textAnchor="middle" y={r + 14} fontSize={11} fill={hover === n.id || lit ? "#e6e8ee" : "#9aa3b5"}>
-                            {n.doc!.name.length > 30 ? n.doc!.name.slice(0, 30) + "…" : n.doc!.name}
-                          </text>
+                          {(view.k >= 0.9 || hover === n.id || lit || hoverTag === n.tag || (!!tagFilter && !dim)) && (
+                            <text textAnchor="middle" y={r + 14} fontSize={11} fill={hover === n.id || lit ? "#e6e8ee" : "#9aa3b5"}>
+                              {n.doc!.name.length > 30 ? n.doc!.name.slice(0, 30) + "…" : n.doc!.name}
+                            </text>
+                          )}
                           {hover === n.id && (
                             <text textAnchor="middle" y={r + 28} fontSize={10} fill="#697287">
                               {n.doc!.tags.map((t) => `#${t}`).join(" ")} · {n.doc!.chunks} passages
