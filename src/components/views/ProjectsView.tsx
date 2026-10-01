@@ -1250,6 +1250,7 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
   const [direct, setDirect] = useState(false);
   const [brief, setBrief] = useState("");
   const [sprints, setSprints] = useState(true);
+  const [granularity, setGranularity] = useState<"macro" | "standard" | "fine">("standard");
   const [error, setError] = useState<string>();
   const entries = specFromTeam(project.team).entry_ids.length;
   return (
@@ -1267,7 +1268,7 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
               variant="primary"
               onClick={async () => {
                 try {
-                  await api("/api/projects/plan", { method: "POST", json: { projectId: project.id, brief, sprints } });
+                  await api("/api/projects/plan", { method: "POST", json: { projectId: project.id, brief, sprints, granularity } });
                   onStarted();
                 } catch (e) {
                   setError(e instanceof Error ? e.message : String(e));
@@ -1302,6 +1303,13 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
         </p>
         <Field label="Consigne (optionnelle)">
           <Textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="ex : priorité au MVP, pas d'interface graphique pour l'instant" />
+        </Field>
+        <Field label="Granularité des tâches" hint="Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Le nombre de tâches suit le périmètre.">
+          <Select value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
+            <option value="macro">Large : un lot de 1 à 3 jours par tâche</option>
+            <option value="standard">Standard : ½ à 1 journée par tâche</option>
+            <option value="fine">Fine : tâches de 1 à 3 heures</option>
+          </Select>
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={sprints} onChange={(e) => setSprints(e.target.checked)} className="accent-[var(--accent)]" />
