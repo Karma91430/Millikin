@@ -21,13 +21,13 @@ export type Run = {
   finished: Promise<void>;
 };
 
-export type RunInfo = Omit<Run, "trace" | "controller" | "listeners" | "finished">;
+export type RunInfo = Omit<Run, "trace" | "controller" | "listeners" | "finished"> & { error?: string };
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const g = globalThis as unknown as { __millikinRuns?: Map<string, Run> };
 const runs = (g.__millikinRuns ??= new Map());
 
-export const info = ({ trace: _t, controller: _c, listeners: _l, finished: _f, ...rest }: Run): RunInfo => (void _t, void _c, void _l, void _f, rest);
+export const info = ({ trace, controller: _c, listeners: _l, finished: _f, ...rest }: Run): RunInfo => (void _c, void _l, void _f, { ...rest, ...(trace.error ? { error: trace.error } : {}) });
 
 export function listRuns(): RunInfo[] {
   const now = Date.now();
