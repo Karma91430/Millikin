@@ -183,6 +183,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   command_timeout: "60",
   max_reasoning: "12000",
   web_fallback: "on",
+  /** Interface and agents' answer language: fr | en. */
+  language: "fr",
 };
 
 export function getSettings(): Record<string, string> {

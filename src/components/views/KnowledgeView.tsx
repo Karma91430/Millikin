@@ -2,6 +2,7 @@
 
 import { FileText, Library, Network, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { api, crud, useData, type Kb } from "../api";
 import { KnowledgeGraph, tagColor, type GDoc } from "../KnowledgeGraph";
 import { Badge, Button, Card, cx, Drawer, Empty, ErrorNote, Field, Input, Modal, PageHeader, Textarea } from "../ui";
@@ -10,6 +11,7 @@ type Doc = { id: string; kb_id: string; name: string; chars: number; chunks: num
 type Hit = { text: string; doc: string; kb: string; tags: string[]; score: number };
 
 export function KnowledgeView() {
+  const { t } = useT();
   const kbs = useData<Kb[]>("/api/crud/kbs");
   const [view, setView] = useState<"list" | "graph">("list");
   const [sel, setSel] = useState<string | null>(null);
@@ -19,8 +21,8 @@ export function KnowledgeView() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Connaissances"
-        subtitle="RAG interne : documents découpés et indexés localement, organisés par tags. Les projets choisissent quelles bases et quels tags leurs agents utilisent."
+        title={t("Connaissances")}
+        subtitle={t("RAG interne : documents découpés et indexés localement, organisés par tags. Les projets choisissent quelles bases et quels tags leurs agents utilisent.")}
         actions={
           <>
             <div className="flex rounded-lg border border-line p-0.5">
@@ -31,12 +33,12 @@ export function KnowledgeView() {
                 ] as const
               ).map(([id, label, Icon]) => (
                 <button key={id} onClick={() => setView(id)} className={cx("flex items-center gap-1.5 rounded-md px-3 py-1 text-sm", view === id ? "bg-surface-3 text-fg" : "text-fg-muted")}>
-                  <Icon size={14} /> {label}
+                  <Icon size={14} /> {t(label)}
                 </button>
               ))}
             </div>
             <Button variant="primary" onClick={() => setCreate(true)}>
-              <Plus size={15} /> Nouvelle base
+              <Plus size={15} /> {t("Nouvelle base")}
             </Button>
           </>
         }
@@ -58,8 +60,8 @@ export function KnowledgeView() {
           {kb ? (
             <KbDetail key={kb.id} kb={kb} onDeleted={() => (setSel(null), kbs.reload())} />
           ) : (
-            <Empty icon={<Library size={28} />} title="Aucune base de connaissances">
-              Crée une base, importe des documents (texte, Markdown, code, PDF) avec des tags, puis connecte-la à un projet.
+            <Empty icon={<Library size={28} />} title={t("Aucune base de connaissances")}>
+              {t("Crée une base, importe des documents (texte, Markdown, code, PDF) avec des tags, puis connecte-la à un projet.")}
             </Empty>
           )}
         </div>
@@ -74,12 +76,13 @@ type RetagEvent = { themes?: string[]; doc?: string; tags?: string[]; error?: st
 
 /** Retag a whole base with the local model, showing the themes and each document as it is done. */
 function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDone: () => void }) {
+  const { t } = useT();
   const [log, setLog] = useState<RetagEvent[] | null>(null);
   const [running, setRunning] = useState(false);
   const themes = log?.findLast((e) => e.themes)?.themes;
   const last = log?.findLast((e) => e.total);
   async function run() {
-    if (!confirm("Le modèle local va proposer des thèmes puis retaguer chaque document de la base (les tags actuels seront remplacés). Continuer ?")) return;
+    if (!confirm(t("Le modèle local va proposer des thèmes puis retaguer chaque document de la base (les tags actuels seront remplacés). Continuer ?"))) return;
     setRunning(true);
     setLog([]);
     try {
@@ -103,20 +106,20 @@ function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDon
   }
   return (
     <>
-      <Button size="sm" onClick={run} disabled={running || !count} title="Le modèle local définit les thèmes de la base puis retague chaque document">
-        <Sparkles size={13} /> {running ? `Tags… ${last?.done ?? 0}/${last?.total ?? count}` : "Retaguer avec le modèle local"}
+      <Button size="sm" onClick={run} disabled={running || !count} title={t("Le modèle local définit les thèmes de la base puis retague chaque document")}>
+        <Sparkles size={13} /> {running ? t("Tags… {done}/{total}", { done: last?.done ?? 0, total: last?.total ?? count }) : t("Retaguer avec le modèle local")}
       </Button>
       {log && (
-        <Modal open onClose={() => !running && setLog(null)} title="Retag par le modèle local">
+        <Modal open onClose={() => !running && setLog(null)} title={t("Retag par le modèle local")}>
           <div className="flex flex-col gap-3 text-sm">
-            {!themes && <p className="text-fg-muted">Le modèle lit les documents et propose les thèmes principaux…</p>}
+            {!themes && <p className="text-fg-muted">{t("Le modèle lit les documents et propose les thèmes principaux…")}</p>}
             {themes && (
               <div>
-                <div className="mb-1 text-xs text-fg-muted">Thèmes retenus (un par document, ils forment les constellations du graphe)</div>
+                <div className="mb-1 text-xs text-fg-muted">{t("Thèmes retenus (un par document, ils forment les constellations du graphe)")}</div>
                 <div className="flex flex-wrap gap-1">
-                  {themes.map((t) => (
-                    <span key={t} className="rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(t) }}>
-                      #{t}
+                  {themes.map((th) => (
+                    <span key={th} className="rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(th) }}>
+                      #{th}
                     </span>
                   ))}
                 </div>
@@ -132,9 +135,9 @@ function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDon
                       <span className="text-red-400">{e.error}</span>
                     ) : (
                       <span className="flex flex-wrap justify-end gap-1">
-                        {e.tags?.map((t, k) => (
-                          <span key={t} className={cx("rounded-full px-1.5 text-[10px]", k === 0 ? "text-white" : "text-fg-muted")} style={k === 0 ? { background: tagColor(t) } : undefined}>
-                            #{t}
+                        {e.tags?.map((tag, k) => (
+                          <span key={tag} className={cx("rounded-full px-1.5 text-[10px]", k === 0 ? "text-white" : "text-fg-muted")} style={k === 0 ? { background: tagColor(tag) } : undefined}>
+                            #{tag}
                           </span>
                         ))}
                       </span>
@@ -142,7 +145,7 @@ function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDon
                   </div>
                 ))}
             </div>
-            <div className="text-xs text-fg-subtle">{running ? `En cours : ${last?.done ?? 0}/${last?.total ?? count} documents` : "Terminé."}</div>
+            <div className="text-xs text-fg-subtle">{running ? t("En cours : {done}/{total} documents", { done: last?.done ?? 0, total: last?.total ?? count }) : t("Terminé.")}</div>
           </div>
         </Modal>
       )}
@@ -152,6 +155,7 @@ function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDon
 
 /** Editable tag chips with an AI suggestion button. */
 function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; onChange: (t: string[]) => void }) {
+  const { t } = useT();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const save = async (next: string[]) => {
@@ -160,10 +164,10 @@ function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; o
   };
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {tags.map((t) => (
-        <span key={t} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(t) }}>
-          #{t}
-          <button onClick={() => save(tags.filter((x) => x !== t))} aria-label={`retirer ${t}`} className="opacity-70 hover:opacity-100">
+      {tags.map((tag) => (
+        <span key={tag} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(tag) }}>
+          #{tag}
+          <button onClick={() => save(tags.filter((x) => x !== tag))} aria-label={t("retirer {tag}", { tag })} className="opacity-70 hover:opacity-100">
             <X size={10} />
           </button>
         </span>
@@ -178,7 +182,7 @@ function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; o
       </form>
       <button
         disabled={busy}
-        title="Suggérer des tags avec l'IA"
+        title={t("Suggérer des tags avec l'IA")}
         onClick={async () => {
           setBusy(true);
           try {
@@ -190,21 +194,22 @@ function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; o
         }}
         className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50"
       >
-        <Sparkles size={11} /> {busy ? "…" : "suggérer"}
+        <Sparkles size={11} /> {busy ? "…" : t("suggérer")}
       </button>
     </div>
   );
 }
 
 function DocDrawer({ doc, onClose }: { doc: GDoc; onClose: () => void }) {
+  const { t } = useT();
   const [tags, setTags] = useState(doc.tags);
   return (
     <Drawer open onClose={onClose} title={`📄 ${doc.name}`}>
       <div className="flex flex-col gap-4 text-sm">
         <div className="text-fg-muted">
-          Base : <b className="text-fg">{doc.kb}</b> · {doc.chunks} passages · {Math.round(doc.chars / 1000)}k caractères
+          {t("Base :")} <b className="text-fg">{doc.kb}</b> · {t("{n} passages", { n: doc.chunks })} · {t("{k}k caractères", { k: Math.round(doc.chars / 1000) })}
         </div>
-        <Field label="Tags" hint="Les tags regroupent les documents en constellations et servent de filtres pour les projets et la recherche.">
+        <Field label={t("Tags")} hint={t("Les tags regroupent les documents en constellations et servent de filtres pour les projets et la recherche.")}>
           <TagEditor docId={doc.id} tags={tags} onChange={setTags} />
         </Field>
       </div>
@@ -213,6 +218,7 @@ function DocDrawer({ doc, onClose }: { doc: GDoc; onClose: () => void }) {
 }
 
 function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
+  const { t } = useT();
   const docs = useData<Doc[]>(`/api/kb?kbId=${kb.id}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -257,20 +263,23 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
             variant="danger"
             size="sm"
             onClick={async () => {
-              if (!confirm(`Supprimer la base « ${kb.name} » et tous ses documents ?`)) return;
+              if (!confirm(t("Supprimer la base « {name} » et tous ses documents ?", { name: kb.name }))) return;
               await crud.remove("kbs", kb.id);
               onDeleted();
             }}
           >
-            <Trash2 size={13} /> Supprimer la base
+            <Trash2 size={13} /> {t("Supprimer la base")}
           </Button>
         </div>
       </div>
       <ErrorNote>{error && <pre className="whitespace-pre-wrap font-sans">{error}</pre>}</ErrorNote>
 
       <Card className="flex flex-col gap-3 p-3">
-        <Field label="Tags appliqués aux prochains imports (séparés par des virgules)" hint="Laisse vide pour que le modèle local tague chaque document : un thème principal puis des tags précis.">
-          <Input value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} placeholder="ex : commander, règles" />
+        <Field
+          label={t("Tags appliqués aux prochains imports (séparés par des virgules)")}
+          hint={t("Laisse vide pour que le modèle local tague chaque document : un thème principal puis des tags précis.")}
+        >
+          <Input value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} placeholder={t("ex : commander, règles")} />
         </Field>
         <div
           onDragOver={(e) => (e.preventDefault(), setDrag(true))}
@@ -284,8 +293,8 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
           className={cx("flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed p-6 text-center transition", drag ? "border-accent bg-accent/5" : "border-line hover:border-line-strong")}
         >
           <Upload size={20} className="text-fg-muted" />
-          <div className="text-sm">{busy ? "Indexation en cours…" : "Dépose des fichiers ou clique pour choisir"}</div>
-          <div className="text-xs text-fg-subtle">.txt .md .pdf .json .csv, code source…</div>
+          <div className="text-sm">{busy ? t("Indexation en cours…") : t("Dépose des fichiers ou clique pour choisir")}</div>
+          <div className="text-xs text-fg-subtle">{t(".txt .md .pdf .json .csv, code source…")}</div>
           <input
             ref={fileRef}
             type="file"
@@ -300,9 +309,9 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
       </Card>
 
       <Card className="flex flex-col gap-2 p-3">
-        <div className="text-sm font-medium">Coller du texte</div>
-        <Input placeholder="Titre du document" value={paste.name} onChange={(e) => setPaste({ ...paste, name: e.target.value })} />
-        <Textarea rows={4} placeholder="Contenu…" value={paste.text} onChange={(e) => setPaste({ ...paste, text: e.target.value })} />
+        <div className="text-sm font-medium">{t("Coller du texte")}</div>
+        <Input placeholder={t("Titre du document")} value={paste.name} onChange={(e) => setPaste({ ...paste, name: e.target.value })} />
+        <Textarea rows={4} placeholder={t("Contenu…")} value={paste.text} onChange={(e) => setPaste({ ...paste, text: e.target.value })} />
         <div className="flex justify-end">
           <Button
             size="sm"
@@ -321,22 +330,22 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
               }
             }}
           >
-            Indexer
+            {t("Indexer")}
           </Button>
         </div>
       </Card>
 
       <Card>
-        <div className="border-b border-line px-3 py-2 text-sm font-medium">Documents ({docs.data?.length ?? 0})</div>
+        <div className="border-b border-line px-3 py-2 text-sm font-medium">{t("Documents ({n})", { n: docs.data?.length ?? 0 })}</div>
         {(docs.data ?? []).map((d) => (
           <div key={d.id} className="flex items-start gap-3 border-b border-line px-3 py-2.5 last:border-0">
             <FileText size={14} className="mt-0.5 text-fg-muted" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm">{d.name}</div>
               <div className="mb-1 text-xs text-fg-subtle">
-                {d.chunks} passages · {Math.round(d.chars / 1000)}k caractères
+                {t("{n} passages", { n: d.chunks })} · {t("{k}k caractères", { k: Math.round(d.chars / 1000) })}
               </div>
-              <TagEditor docId={d.id} tags={d.tags} onChange={(t) => docs.setData((xs) => xs?.map((x) => (x.id === d.id ? { ...x, tags: t } : x)))} />
+              <TagEditor docId={d.id} tags={d.tags} onChange={(tg) => docs.setData((xs) => xs?.map((x) => (x.id === d.id ? { ...x, tags: tg } : x)))} />
             </div>
             <Button
               size="sm"
@@ -350,11 +359,11 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
             </Button>
           </div>
         ))}
-        {!docs.data?.length && <div className="px-3 py-3 text-xs text-fg-subtle">Aucun document.</div>}
+        {!docs.data?.length && <div className="px-3 py-3 text-xs text-fg-subtle">{t("Aucun document.")}</div>}
       </Card>
 
       <Card className="flex flex-col gap-2 p-3">
-        <div className="text-sm font-medium">Tester la recherche</div>
+        <div className="text-sm font-medium">{t("Tester la recherche")}</div>
         {tagsInUse.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {tagsInUse.map((t) => (
@@ -380,7 +389,7 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
             }
           }}
         >
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Pose une question…" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Pose une question…")} />
           <Button type="submit" disabled={!q.trim()}>
             <Search size={14} />
           </Button>
@@ -389,7 +398,7 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
           <div key={i} className="rounded-lg bg-surface-2 p-2.5 text-xs">
             <div className="mb-1 flex justify-between gap-2 text-fg-subtle">
               <span className="truncate">{h.doc}</span>
-              <span className="shrink-0">score {h.score.toFixed(3)}</span>
+              <span className="shrink-0">{t("score {s}", { s: h.score.toFixed(3) })}</span>
             </div>
             <div className="mb-1 flex flex-wrap gap-1">
               {h.tags.map((t) => (
@@ -401,20 +410,21 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
             <div className="line-clamp-4 whitespace-pre-wrap text-fg-muted">{h.text}</div>
           </div>
         ))}
-        {hits && !hits.length && <div className="text-xs text-fg-subtle">Aucun résultat.</div>}
+        {hits && !hits.length && <div className="text-xs text-fg-subtle">{t("Aucun résultat.")}</div>}
       </Card>
     </div>
   );
 }
 
 function CreateKb({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
+  const { t } = useT();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Nouvelle base de connaissances"
+      title={t("Nouvelle base de connaissances")}
       footer={
         <Button
           variant="primary"
@@ -427,15 +437,15 @@ function CreateKb({ open, onClose, onCreated }: { open: boolean; onClose: () => 
             onClose();
           }}
         >
-          Créer
+          {t("Créer")}
         </Button>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Nom">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Docs techniques du projet" />
+        <Field label={t("Nom")}>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Docs techniques du projet")} />
         </Field>
-        <Field label="Description">
+        <Field label={t("Description")}>
           <Input value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
       </div>

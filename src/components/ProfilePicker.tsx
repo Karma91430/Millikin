@@ -2,6 +2,7 @@
 
 import { FilePlus2, Search, Sparkles, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useT } from "@/i18n";
 import { useData, type Profile } from "./api";
 import { Avatar, Badge, Button, cx, Input } from "./ui";
 
@@ -19,6 +20,7 @@ export function ProfileGrid({
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | null>(null);
+  const { t } = useT();
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const shown = useMemo(
     () =>
@@ -35,11 +37,11 @@ export function ProfileGrid({
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-56 flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
-          <Input className="pl-8" placeholder="Rechercher un profil (ex : sécurité, SEO, data…)" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input className="pl-8" placeholder={t("Rechercher un profil (ex : sécurité, SEO, data…)")} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-1">
           <button onClick={() => setCat(null)} className={cx("rounded-lg px-2.5 py-1 text-xs", !cat ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
-            Tous
+            {t("Tous")}
           </button>
           {cats.map((c) => (
             <button key={c} onClick={() => setCat(c === cat ? null : c)} className={cx("rounded-lg px-2.5 py-1 text-xs", cat === c ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
@@ -62,7 +64,7 @@ export function ProfileGrid({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-sm font-medium">{p.name}</span>
-                    {!p.builtin && <Badge color="#8b5cf6">perso</Badge>}
+                    {!p.builtin && <Badge color="#8b5cf6">{t("perso")}</Badge>}
                   </div>
                   <div className="line-clamp-2 text-xs text-fg-muted">{p.role}</div>
                 </div>
@@ -72,7 +74,7 @@ export function ProfileGrid({
           </div>
         </div>
       ))}
-      {!groups.length && <div className="py-8 text-center text-sm text-fg-subtle">Aucun profil ne correspond.</div>}
+      {!groups.length && <div className="py-8 text-center text-sm text-fg-subtle">{t("Aucun profil ne correspond.")}</div>}
     </div>
   );
 }
@@ -84,7 +86,7 @@ export function ProfilePicker({
   onPick,
   onBlank,
   onGenerate,
-  title = "Nouvel agent",
+  title,
 }: {
   open: boolean;
   onClose: () => void;
@@ -94,16 +96,17 @@ export function ProfilePicker({
   title?: string;
 }) {
   const data = useData<ProfilesData>(open ? "/api/profiles" : null);
+  const { t } = useT();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]" onMouseDown={onClose}>
       <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-2xl border border-line bg-surface-0 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div>
-            <div className="text-base font-semibold">{title}</div>
-            <div className="text-xs text-fg-muted">Pars d&apos;un profil : tout reste modifiable avant d&apos;enregistrer.</div>
+            <div className="text-base font-semibold">{title ?? t("Nouvel agent")}</div>
+            <div className="text-xs text-fg-muted">{t("Pars d'un profil : tout reste modifiable avant d'enregistrer.")}</div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Fermer">
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label={t("Fermer")}>
             <X size={16} />
           </Button>
         </div>
@@ -114,8 +117,8 @@ export function ProfilePicker({
                 <button onClick={onBlank} className="flex items-center gap-3 rounded-xl border border-dashed border-line p-3 text-left hover:border-line-strong">
                   <FilePlus2 size={20} className="text-fg-muted" />
                   <span>
-                    <span className="block text-sm font-medium">Fiche vierge</span>
-                    <span className="block text-xs text-fg-muted">Tout définir soi-même</span>
+                    <span className="block text-sm font-medium">{t("Fiche vierge")}</span>
+                    <span className="block text-xs text-fg-muted">{t("Tout définir soi-même")}</span>
                   </span>
                 </button>
               )}
@@ -123,8 +126,8 @@ export function ProfilePicker({
                 <button onClick={onGenerate} className="flex items-center gap-3 rounded-xl border border-dashed border-accent/40 bg-accent/5 p-3 text-left hover:border-accent">
                   <Sparkles size={20} className="text-accent" />
                   <span>
-                    <span className="block text-sm font-medium">Générer avec l&apos;IA</span>
-                    <span className="block text-xs text-fg-muted">Décris le rôle, le modèle local rédige le profil</span>
+                    <span className="block text-sm font-medium">{t("Générer avec l'IA")}</span>
+                    <span className="block text-xs text-fg-muted">{t("Décris le rôle, le modèle local rédige le profil")}</span>
                   </span>
                 </button>
               )}

@@ -2,6 +2,7 @@
 
 import { ArrowDownToLine, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { childrenOf, type Trace } from "@/lib/trace";
 import type { Agent } from "../api";
 import { Avatar, Button, cx, Markdown } from "../ui";
@@ -18,6 +19,7 @@ const STATUS: Record<string, string> = {
 
 /** Large live view of one agent call; keeps following the stream while the user reads. */
 export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: Trace; callId: string; agents: Map<string, Agent>; onClose: () => void; onFocus: (id: string) => void }) {
+  const { t } = useT();
   const call = trace.calls[callId];
   const agent = call ? agents.get(call.agentId) : undefined;
   const parent = call?.parentCallId ? trace.calls[call.parentCallId] : undefined;
@@ -29,8 +31,8 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     if (!live) return;
-    const t = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, [live]);
 
   // Stick to the bottom while text streams, unless the user scrolled up to re-read.
@@ -57,15 +59,15 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
             <div className="font-semibold">{agent.name}</div>
             <div className="flex items-center gap-1.5 text-xs" style={{ color: live ? agent.color : "var(--fg-muted)" }}>
               {live && <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: agent.color }} />}
-              {STATUS[call.status] ?? call.status} · {secs}s
+              {STATUS[call.status] ? t(STATUS[call.status]) : call.status} · {secs}s
             </div>
           </div>
           {!follow && (
             <Button size="sm" variant="soft" onClick={() => setFollow(true)}>
-              <ArrowDownToLine size={13} /> Suivre
+              <ArrowDownToLine size={13} /> {t("Suivre")}
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Fermer">
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label={t("Fermer")}>
             <X size={16} />
           </Button>
         </div>
@@ -80,7 +82,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
         >
           <section>
             <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">
-              {caller ? `Demande de ${caller.name}` : "Demande de l'utilisateur"}
+              {caller ? t("Demande de {name}", { name: caller.name }) : t("Demande de l'utilisateur")}
             </div>
             <div className="whitespace-pre-wrap rounded-xl px-4 py-3 text-sm" style={{ background: `${(caller ?? agent).color}1a` }}>
               {call.input}
@@ -91,7 +93,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
 
           {call.tools.some((t) => t.name !== "ask_agent") && (
             <section>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">Outils</div>
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{t("Outils")}</div>
               <div className="flex flex-col gap-1.5">
                 {call.tools
                   .filter((t) => t.name !== "ask_agent")
@@ -104,7 +106,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
 
           {children.length > 0 && (
             <section>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">Délégations</div>
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{t("Délégations")}</div>
               <div className="flex flex-wrap gap-2">
                 {children.map((c) => {
                   const a = agents.get(c.agentId);
@@ -118,7 +120,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
                     >
                       <span>{a?.emoji}</span>
                       <span className="font-medium">{a?.name}</span>
-                      <span className={cx("text-fg-subtle", cl && "animate-pulse")}>{cl ? "en cours" : "voir"}</span>
+                      <span className={cx("text-fg-subtle", cl && "animate-pulse")}>{cl ? t("en cours") : t("voir")}</span>
                     </button>
                   );
                 })}
@@ -127,7 +129,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
           )}
 
           <section>
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">Réponse</div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{t("Réponse")}</div>
             {call.status === "error" ? (
               <div className="text-sm text-red-400">⚠️ {call.error}</div>
             ) : call.text ? (
@@ -135,7 +137,7 @@ export function CallFocus({ trace, callId, agents, onClose, onFocus }: { trace: 
                 <Markdown className={cx("text-[15px]", live && "caret")}>{call.text}</Markdown>
               </div>
             ) : (
-              <div className="text-sm text-fg-subtle">{live ? "La réponse s'affichera ici dès les premiers mots…" : "(pas de texte)"}</div>
+              <div className="text-sm text-fg-subtle">{live ? t("La réponse s'affichera ici dès les premiers mots…") : t("(pas de texte)")}</div>
             )}
           </section>
         </div>

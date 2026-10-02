@@ -2,6 +2,7 @@
 
 import { Brain, ChevronDown, ChevronRight, Maximize2 } from "lucide-react";
 import { useState } from "react";
+import { useT } from "@/i18n";
 import { childrenOf, type CallNode, type ToolUse, type Trace } from "@/lib/trace";
 import type { Agent } from "../api";
 import { Avatar, cx, Markdown } from "../ui";
@@ -56,12 +57,13 @@ export function ToolChip({ t }: { t: ToolUse }) {
 }
 
 export function Reasoning({ text, live }: { text: string; live: boolean }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   if (!text.trim()) return null;
   return (
     <div className="text-xs">
       <button onClick={() => setOpen(!open)} className="inline-flex items-center gap-1 text-fg-subtle hover:text-fg-muted">
-        <Brain size={12} /> {live ? "réfléchit…" : "réflexion"} {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Brain size={12} /> {live ? t("réfléchit…") : t("réflexion")} {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </button>
       {open && <div className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-2 p-2 text-[11px] text-fg-muted">{text}</div>}
     </div>
@@ -71,12 +73,13 @@ export function Reasoning({ text, live }: { text: string; live: boolean }) {
 /** Two-party exchange: the caller's question (left) and the callee's answer (right). */
 type Expand = (callId: string) => void;
 
-export function ExpandButton({ onClick, title = "Agrandir (suivi en direct)" }: { onClick: () => void; title?: string }) {
+export function ExpandButton({ onClick, title }: { onClick: () => void; title?: string }) {
+  const { t } = useT();
   return (
     <span
       role="button"
       tabIndex={0}
-      title={title}
+      title={title ?? t("Agrandir (suivi en direct)")}
       onClick={(e) => (e.stopPropagation(), onClick())}
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), onClick())}
       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-fg-subtle hover:bg-surface-3 hover:text-fg"
@@ -101,6 +104,7 @@ function Delegation({
   depth: number;
   onExpand?: Expand;
 }) {
+  const { t } = useT();
   const callee = agents.get(call.agentId);
   const [open, setOpen] = useState(true);
   if (!callee) return null;
@@ -117,7 +121,7 @@ function Delegation({
         <span className="font-medium" style={{ color: callee.color }}>
           {callee.name}
         </span>
-        <span className="ml-auto text-fg-subtle">{live ? "en cours…" : call.status === "error" ? "erreur" : secs !== null ? `${secs}s` : ""}</span>
+        <span className="ml-auto text-fg-subtle">{live ? t("en cours…") : call.status === "error" ? t("erreur") : secs !== null ? `${secs}s` : ""}</span>
         {onExpand && <ExpandButton onClick={() => onExpand(call.callId)} />}
       </button>
       {open && (

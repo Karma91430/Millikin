@@ -2,6 +2,7 @@
 
 import { Blocks, FileUp, Library, Plus, RefreshCw, Search, Sparkles, Trash2, Users, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { SKILL_CATEGORIES } from "@/lib/skillLibrary";
 import { api, crud, useData, type Agent, type Skill } from "../api";
 import { Avatar, Badge, Button, cx, Drawer, Empty, ErrorNote, Field, Input, Markdown, Modal, PageHeader, Select, Textarea } from "../ui";
@@ -42,9 +43,14 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
   const available = (lib.data ?? []).filter((s) => !s.installed).map((s) => s.name);
   const sel = picked ?? available;
   const outdated = (lib.data ?? []).filter((s) => s.outdated).map((s) => s.name);
+  const { t } = useT();
   const run = async (json: object) => {
     const r = await api<{ added: number; updated: number; assigned: number }>("/api/skills/library", { method: "POST", json });
-    setResult([r.added && `${r.added} ajouté(s)`, r.updated && `${r.updated} mis à jour`, r.assigned && `${r.assigned} agent(s) équipé(s)`].filter(Boolean).join(", ") || "Rien à changer.");
+    setResult(
+      [r.added && t("{n} ajouté(s)", { n: r.added }), r.updated && t("{n} mis à jour", { n: r.updated }), r.assigned && t("{n} agent(s) équipé(s)", { n: r.assigned })]
+        .filter(Boolean)
+        .join(", ") || t("Rien à changer."),
+    );
     setPicked([]);
     lib.reload();
     onInstalled();
@@ -53,15 +59,15 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
     <Modal
       open
       onClose={onClose}
-      title="Bibliothèque de skills"
+      title={t("Bibliothèque de skills")}
       footer={
         <>
           <label className="mr-auto flex items-center gap-2 text-sm">
             <input type="checkbox" checked={assign} onChange={(e) => setAssign(e.target.checked)} className="accent-[var(--accent)]" />
-            Attribuer aux agents des profils recommandés
+            {t("Attribuer aux agents des profils recommandés")}
           </label>
           <Button variant="ghost" onClick={onClose}>
-            Fermer
+            {t("Fermer")}
           </Button>
           <Button
             variant="primary"
@@ -69,7 +75,7 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
             // Nothing new to add: (re)assign the installed library skills to the matching agents.
             onClick={() => run({ names: sel.length ? sel : (lib.data ?? []).filter((s) => s.installed).map((s) => s.name), assign })}
           >
-            {sel.length ? `Ajouter ${sel.length}` : "Attribuer aux agents"}
+            {sel.length ? t("Ajouter {n}", { n: sel.length }) : t("Attribuer aux agents")}
           </Button>
         </>
       }
@@ -80,14 +86,14 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
           <div className="flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm">
             <RefreshCw size={14} className="text-accent" />
             <span className="flex-1">
-              {outdated.length} skill(s) installé(s) ont une version enrichie dans la bibliothèque. La mise à jour remplace leur texte (tes modifications éventuelles seraient perdues).
+              {t("{n} skill(s) installé(s) ont une version enrichie dans la bibliothèque. La mise à jour remplace leur texte (tes modifications éventuelles seraient perdues).", { n: outdated.length })}
             </span>
             <Button size="sm" onClick={() => run({ update: outdated })}>
-              Mettre à jour
+              {t("Mettre à jour")}
             </Button>
           </div>
         )}
-        <p className="text-xs text-fg-muted">Des méthodes courtes et des formats de sortie, pensés pour les modèles locaux. Chaque skill est ajouté au prompt des agents qui le possèdent.</p>
+        <p className="text-xs text-fg-muted">{t("Des méthodes courtes et des formats de sortie, pensés pour les modèles locaux. Chaque skill est ajouté au prompt des agents qui le possèdent.")}</p>
         <div className="max-h-[55vh] overflow-y-auto rounded-lg border border-line">
           {SKILL_CATEGORIES.map((cat) => {
             const items = (lib.data ?? []).filter((s) => s.category === cat);
@@ -96,7 +102,7 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
               <div key={cat}>
                 <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface-1 px-3 py-1.5 text-xs font-semibold">
                   <span className="h-2 w-2 rounded-full" style={{ background: CATEGORY_COLOR[cat] }} />
-                  {cat}
+                  {t(cat)}
                 </div>
                 {items.map((s) => (
                   <label key={s.name} className={cx("flex items-start gap-3 border-b border-line px-3 py-2 last:border-0", s.installed ? "opacity-70" : "cursor-pointer hover:bg-surface-2")}>
@@ -109,10 +115,10 @@ function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstall
                     />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2 text-sm font-medium">
-                        {s.name} {s.installed && <Badge>installé</Badge>} {s.outdated && <Badge color="#7c6cf6">mise à jour</Badge>}
+                        {s.name} {s.installed && <Badge>{t("installé")}</Badge>} {s.outdated && <Badge color="#7c6cf6">{t("mise à jour")}</Badge>}
                       </span>
                       <span className="block text-xs text-fg-muted">{s.description}</span>
-                      <span className="block text-[11px] text-fg-subtle">Pour : {s.profiles.join(", ")}</span>
+                      <span className="block text-[11px] text-fg-subtle">{t("Pour : {list}", { list: s.profiles.join(", ") })}</span>
                     </span>
                   </label>
                 ))}
@@ -130,11 +136,12 @@ function GenerateSkill({ onClose, onDraft }: { onClose: () => void; onDraft: (s:
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const { t } = useT();
   return (
     <Modal
       open
       onClose={onClose}
-      title="Générer un skill avec l'IA"
+      title={t("Générer un skill avec l'IA")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -154,14 +161,14 @@ function GenerateSkill({ onClose, onDraft }: { onClose: () => void; onDraft: (s:
               }
             }}
           >
-            <Sparkles size={14} /> {busy ? "Génération…" : "Générer un brouillon"}
+            <Sparkles size={14} /> {busy ? t("Génération…") : t("Générer un brouillon")}
           </Button>
         </>
       }
     >
       <ErrorNote>{error}</ErrorNote>
-      <Field label="Ce que le skill doit apprendre aux agents" hint="Le modèle local rédige un brouillon que tu pourras relire et modifier avant de l'enregistrer.">
-        <Textarea rows={4} autoFocus value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="ex : revue de code orientée sécurité, avec une grille de sévérité" />
+      <Field label={t("Ce que le skill doit apprendre aux agents")} hint={t("Le modèle local rédige un brouillon que tu pourras relire et modifier avant de l'enregistrer.")}>
+        <Textarea rows={4} autoFocus value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("ex : revue de code orientée sécurité, avec une grille de sévérité")} />
       </Field>
     </Modal>
   );
@@ -188,8 +195,9 @@ function SkillDrawer({
   const [error, setError] = useState<string>();
   const color = CATEGORY_COLOR[categoryOf({ category: cur.category ?? "" })];
   const users = agents.filter((a) => cur.id && a.skill_ids?.includes(cur.id));
+  const { t } = useT();
   const save = async () => {
-    if (!cur.name?.trim()) return setError("Le nom est obligatoire");
+    if (!cur.name?.trim()) return setError(t("Le nom est obligatoire"));
     const s = await crud.save<Skill>("skills", cur);
     setCur(s);
     setEditing(false);
@@ -210,7 +218,7 @@ function SkillDrawer({
       title={
         <span className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
-          {cur.name || "Nouveau skill"}
+          {cur.name || t("Nouveau skill")}
         </span>
       }
       footer={
@@ -219,7 +227,7 @@ function SkillDrawer({
             <Button
               variant="danger"
               onClick={async () => {
-                if (!confirm(`Supprimer le skill « ${cur.name} » ?`)) return;
+                if (!confirm(t("Supprimer le skill « {name} » ?", { name: cur.name ?? "" }))) return;
                 await crud.remove("skills", cur.id!);
                 onSaved(null);
               }}
@@ -232,16 +240,16 @@ function SkillDrawer({
             <>
               {cur.id && (
                 <Button variant="ghost" onClick={() => (setCur(initial), setEditing(false))}>
-                  Annuler
+                  {t("Annuler")}
                 </Button>
               )}
               <Button variant="primary" onClick={save}>
-                Enregistrer
+                {t("Enregistrer")}
               </Button>
             </>
           ) : (
             <Button variant="primary" onClick={() => setEditing(true)}>
-              Modifier
+              {t("Modifier")}
             </Button>
           )}
         </>
@@ -252,7 +260,7 @@ function SkillDrawer({
         {outdated && !editing && (
           <div className="flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs">
             <RefreshCw size={13} className="text-accent" />
-            <span className="flex-1">La bibliothèque propose une version enrichie de ce skill.</span>
+            <span className="flex-1">{t("La bibliothèque propose une version enrichie de ce skill.")}</span>
             <Button
               size="sm"
               onClick={async () => {
@@ -262,48 +270,48 @@ function SkillDrawer({
                 onSaved(fresh ?? null);
               }}
             >
-              Mettre à jour
+              {t("Mettre à jour")}
             </Button>
           </div>
         )}
         {editing ? (
           <>
             <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
-              <Field label="Nom">
+              <Field label={t("Nom")}>
                 <Input value={cur.name ?? ""} onChange={(e) => setCur({ ...cur, name: e.target.value })} />
               </Field>
-              <Field label="Catégorie">
+              <Field label={t("Catégorie")}>
                 <Select value={cur.category ?? ""} onChange={(e) => setCur({ ...cur, category: e.target.value })}>
-                  <option value="">{OTHER}</option>
+                  <option value="">{t(OTHER)}</option>
                   {SKILL_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {t(c)}
                     </option>
                   ))}
                 </Select>
               </Field>
             </div>
-            <Field label="Quand l'utiliser">
+            <Field label={t("Quand l'utiliser")}>
               <Input value={cur.description ?? ""} onChange={(e) => setCur({ ...cur, description: e.target.value })} />
             </Field>
-            <Field label="Instructions (Markdown)" hint={`≈ ${tokens(cur as Skill)} tokens ajoutés au prompt de chaque agent qui possède ce skill.`}>
+            <Field label={t("Instructions (Markdown)")} hint={t("≈ {n} tokens ajoutés au prompt de chaque agent qui possède ce skill.", { n: tokens(cur as Skill) })}>
               <Textarea rows={20} className="font-mono text-xs" value={cur.content ?? ""} onChange={(e) => setCur({ ...cur, content: e.target.value })} />
             </Field>
           </>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 text-xs text-fg-muted">
-              <Badge color={color}>{categoryOf({ category: cur.category ?? "" })}</Badge>
-              <span>≈ {tokens(cur as Skill)} tokens</span>
+              <Badge color={color}>{t(categoryOf({ category: cur.category ?? "" }))}</Badge>
+              <span>{t("≈ {n} tokens", { n: tokens(cur as Skill) })}</span>
             </div>
             <p className="text-sm text-fg-muted">{cur.description}</p>
             <div className="rounded-lg border border-line bg-surface-0 p-4 text-sm">
-              <Markdown>{cur.content || "_vide_"}</Markdown>
+              <Markdown>{cur.content || `_${t("vide")}_`}</Markdown>
             </div>
           </>
         )}
         {cur.id && (
-          <Field label={`Agents qui possèdent ce skill (${users.length})`} hint="Coche pour ajouter le skill au prompt de l'agent ; décoche pour le retirer.">
+          <Field label={t("Agents qui possèdent ce skill ({n})", { n: users.length })} hint={t("Coche pour ajouter le skill au prompt de l'agent ; décoche pour le retirer.")}>
             <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
               {agents.map((a) => (
                 <label key={a.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-2">
@@ -334,12 +342,13 @@ export function SkillsView() {
   const [usage, setUsage] = useState<Usage>("all");
   const [onlyOutdated, setOnlyOutdated] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { t } = useT();
 
   const all = useMemo(() => skills.data ?? [], [skills.data]);
   const agentList = agents.data ?? [];
   const usersOf = (s: Skill) => agentList.filter((a) => a.skill_ids?.includes(s.id));
   const outdated = new Set((lib.data ?? []).filter((s) => s.outdated && s.id).map((s) => s.id!));
-  const norm = (t: string) => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const norm = (x: string) => x.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   const visible = all.filter(
     (s) =>
       (!q || norm(`${s.name} ${s.description} ${s.content}`).includes(norm(q))) &&
@@ -354,8 +363,8 @@ export function SkillsView() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Skills"
-        subtitle="Des méthodes et formats réutilisables, injectés dans le prompt des agents qui les possèdent."
+        title={t("Skills")}
+        subtitle={t("Des méthodes et formats réutilisables, injectés dans le prompt des agents qui les possèdent.")}
         actions={
           <>
             <input
@@ -371,16 +380,16 @@ export function SkillsView() {
               }}
             />
             <Button onClick={() => setGenerate(true)}>
-              <Sparkles size={15} /> Générer avec l&apos;IA
+              <Sparkles size={15} /> {t("Générer avec l'IA")}
             </Button>
             <Button onClick={() => setLibrary(true)}>
-              <Library size={15} /> Bibliothèque
+              <Library size={15} /> {t("Bibliothèque")}
             </Button>
             <Button onClick={() => fileRef.current?.click()}>
-              <FileUp size={15} /> Importer SKILL.md
+              <FileUp size={15} /> {t("Importer SKILL.md")}
             </Button>
             <Button variant="primary" onClick={() => setOpen({ name: "", description: "", content: "", category: cat && cat !== OTHER ? cat : "" })}>
-              <Plus size={15} /> Nouveau skill
+              <Plus size={15} /> {t("Nouveau skill")}
             </Button>
           </>
         }
@@ -390,11 +399,11 @@ export function SkillsView() {
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-6 py-3">
         <div className="relative w-64">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un skill…" className="h-8 pl-8 text-sm" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Rechercher un skill…")} className="h-8 pl-8 text-sm" />
         </div>
         <div className="flex flex-wrap gap-1">
           <button onClick={() => setCat(null)} className={cx("rounded-full border px-2.5 py-1 text-xs", !cat ? "border-accent bg-accent/15 text-fg" : "border-line text-fg-muted hover:text-fg")}>
-            Toutes <span className="opacity-60">{all.length}</span>
+            {t("Toutes")} <span className="opacity-60">{all.length}</span>
           </button>
           {categories.map((c) => (
             <button
@@ -404,7 +413,7 @@ export function SkillsView() {
               style={cat === c ? { borderColor: CATEGORY_COLOR[c], background: `${CATEGORY_COLOR[c]}26` } : undefined}
             >
               <span className="h-2 w-2 rounded-full" style={{ background: CATEGORY_COLOR[c] }} />
-              {c} <span className="opacity-60">{all.filter((s) => categoryOf(s) === c).length}</span>
+              {t(c)} <span className="opacity-60">{all.filter((s) => categoryOf(s) === c).length}</span>
             </button>
           ))}
         </div>
@@ -414,7 +423,7 @@ export function SkillsView() {
               onClick={() => setOnlyOutdated(!onlyOutdated)}
               className={cx("flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs", onlyOutdated ? "border-accent bg-accent/15 text-fg" : "border-line text-fg-muted hover:text-fg")}
             >
-              <RefreshCw size={11} /> Mises à jour {outdated.size}
+              <RefreshCw size={11} /> {t("Mises à jour")} {outdated.size}
             </button>
           )}
           <div className="flex rounded-lg border border-line p-0.5 text-xs">
@@ -426,7 +435,7 @@ export function SkillsView() {
               ] as [Usage, string][]
             ).map(([v, label]) => (
               <button key={v} onClick={() => setUsage(v)} className={cx("rounded-md px-2.5 py-1", usage === v ? "bg-surface-3 text-fg" : "text-fg-muted hover:text-fg")}>
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
@@ -435,19 +444,19 @@ export function SkillsView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         {!all.length ? (
-          <Empty icon={<Blocks size={28} />} title="Aucun skill">
-            Ajoute les skills de la bibliothèque, importe un SKILL.md ou génère un brouillon avec l&apos;IA, puis attache-les aux agents concernés.
+          <Empty icon={<Blocks size={28} />} title={t("Aucun skill")}>
+            {t("Ajoute les skills de la bibliothèque, importe un SKILL.md ou génère un brouillon avec l'IA, puis attache-les aux agents concernés.")}
           </Empty>
         ) : !visible.length ? (
           <div className="flex flex-col items-center gap-2 py-16 text-sm text-fg-muted">
-            Aucun skill ne correspond aux filtres.
+            {t("Aucun skill ne correspond aux filtres.")}
             <Button size="sm" variant="ghost" onClick={() => (setQ(""), setCat(null), setUsage("all"), setOnlyOutdated(false))}>
-              <X size={13} /> Effacer les filtres
+              <X size={13} /> {t("Effacer les filtres")}
             </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {filtered && <div className="text-xs text-fg-subtle">{visible.length} skill(s) affiché(s) sur {all.length}</div>}
+            {filtered && <div className="text-xs text-fg-subtle">{t("{n} skill(s) affiché(s) sur {total}", { n: visible.length, total: all.length })}</div>}
             {categories.map((c) => {
               const items = visible.filter((s) => categoryOf(s) === c);
               if (!items.length) return null;
@@ -455,7 +464,7 @@ export function SkillsView() {
                 <section key={c}>
                   <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: CATEGORY_COLOR[c] }} />
-                    {c}
+                    {t(c)}
                     <span className="text-xs font-normal text-fg-subtle">{items.length}</span>
                   </h2>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -470,11 +479,11 @@ export function SkillsView() {
                           <span className="absolute inset-y-0 left-0 w-1" style={{ background: CATEGORY_COLOR[c] }} />
                           <div className="flex items-start gap-2">
                             <span className="flex-1 text-sm font-semibold leading-snug">{s.name}</span>
-                            {outdated.has(s.id) && <Badge color="#7c6cf6">mise à jour</Badge>}
+                            {outdated.has(s.id) && <Badge color="#7c6cf6">{t("mise à jour")}</Badge>}
                           </div>
-                          <p className="line-clamp-2 text-xs leading-relaxed text-fg-muted">{s.description || "Sans description"}</p>
+                          <p className="line-clamp-2 text-xs leading-relaxed text-fg-muted">{s.description || t("Sans description")}</p>
                           <div className="mt-auto flex items-center gap-2 pt-1 text-[11px] text-fg-subtle">
-                            <span>≈ {tokens(s)} tokens</span>
+                            <span>{t("≈ {n} tokens", { n: tokens(s) })}</span>
                             <span className="ml-auto flex items-center gap-1">
                               {users.length ? (
                                 <>
@@ -489,7 +498,7 @@ export function SkillsView() {
                                 </>
                               ) : (
                                 <span className="flex items-center gap-1">
-                                  <Users size={11} /> aucun agent
+                                  <Users size={11} /> {t("aucun agent")}
                                 </span>
                               )}
                             </span>

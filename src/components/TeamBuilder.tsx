@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import { LayoutGrid, Search, Star, UserPlus, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useT } from "@/i18n";
 import { layoutOf, type TeamSpec } from "@/lib/team";
 import { crud, type Agent } from "./api";
 import { ProfilePicker } from "./ProfilePicker";
@@ -32,6 +33,7 @@ type LinkData = { remove: () => void };
 
 function BuilderNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
   const { agent, entry } = data;
+  const { t } = useT();
   return (
     <div
       className={cx("group relative flex w-[220px] items-center gap-2.5 rounded-2xl border bg-surface-1 px-3 py-2.5 shadow-lg", selected && "ring-2 ring-accent/60")}
@@ -45,19 +47,19 @@ function BuilderNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
         <div className="truncate text-[11px] text-fg-muted">{agent.role}</div>
         {entry && (
           <div className="mt-0.5 text-[10px] font-semibold" style={{ color: agent.color }}>
-            ★ premier contact
+            ★ {t("premier contact")}
           </div>
         )}
       </div>
       <div className="nodrag absolute -top-3 right-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
         <button
           onClick={data.toggleEntry}
-          title={entry ? "Retirer des premiers contacts" : "Définir comme premier contact"}
+          title={entry ? t("Retirer des premiers contacts") : t("Définir comme premier contact")}
           className={cx("flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface-2", entry ? "text-amber-400" : "text-fg-subtle hover:text-amber-400")}
         >
           <Star size={12} fill={entry ? "currentColor" : "none"} />
         </button>
-        <button onClick={data.remove} title="Retirer de l'équipe" className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface-2 text-fg-subtle hover:text-red-400">
+        <button onClick={data.remove} title={t("Retirer de l'équipe")} className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface-2 text-fg-subtle hover:text-red-400">
           <X size={12} />
         </button>
       </div>
@@ -66,13 +68,14 @@ function BuilderNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
 }
 
 function UserNode() {
+  const { t } = useT();
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-dashed border-line-strong bg-surface-1 px-3 py-2.5">
       <Handle type="source" position={Position.Right} className="!opacity-0" isConnectable={false} />
       <span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-3 text-lg">🙂</span>
       <div>
-        <div className="text-sm font-semibold">Vous</div>
-        <div className="text-[11px] text-fg-muted">parlez aux ★</div>
+        <div className="text-sm font-semibold">{t("Vous")}</div>
+        <div className="text-[11px] text-fg-muted">{t("parlez aux ★")}</div>
       </div>
     </div>
   );
@@ -80,6 +83,7 @@ function UserNode() {
 
 function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected, style }: EdgeProps<Edge<LinkData>>) {
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const { t } = useT();
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ ...style, strokeWidth: selected ? 2.5 : 1.8 }} />
@@ -87,7 +91,7 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
         <EdgeLabelRenderer>
           <button
             onClick={data.remove}
-            title="Supprimer ce lien"
+            title={t("Supprimer ce lien")}
             className={cx(
               "nodrag nopan absolute flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface-2 text-fg-subtle transition hover:text-red-400",
               selected ? "opacity-100" : "opacity-40 hover:opacity-100",
@@ -198,6 +202,7 @@ export function TeamBuilder({ agents, value, onChange, onAgentCreated }: { agent
   const [picker, setPicker] = useState(false);
   const [created, setCreated] = useState<Agent[]>([]);
   const all = useMemo(() => [...agents, ...created.filter((c) => !agents.some((a) => a.id === c.id))], [agents, created]);
+  const { t } = useT();
   const available = all.filter((a) => !value.agent_ids.includes(a.id) && (!q || `${a.name} ${a.role}`.toLowerCase().includes(q.toLowerCase())));
 
   const add = (id: string) => {
@@ -217,16 +222,16 @@ export function TeamBuilder({ agents, value, onChange, onAgentCreated }: { agent
       <div className="flex w-60 shrink-0 flex-col border-r border-line">
         <div className="border-b border-line p-2.5">
           <Button size="sm" variant="soft" className="w-full" onClick={() => setPicker(true)}>
-            <UserPlus size={13} /> Nouvel agent depuis un profil
+            <UserPlus size={13} /> {t("Nouvel agent depuis un profil")}
           </Button>
           <div className="relative mt-2">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle" />
-            <Input className="h-8 pl-7 text-xs" placeholder="Agents existants…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input className="h-8 pl-7 text-xs" placeholder={t("Agents existants…")} value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-1.5">
           {available.map((a) => (
-            <button key={a.id} onClick={() => add(a.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2" title="Ajouter à l'équipe">
+            <button key={a.id} onClick={() => add(a.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2" title={t("Ajouter à l'équipe")}>
               <Avatar emoji={a.emoji} color={a.color} size={26} />
               <span className="min-w-0">
                 <span className="block truncate text-xs font-medium">{a.name}</span>
@@ -234,18 +239,19 @@ export function TeamBuilder({ agents, value, onChange, onAgentCreated }: { agent
               </span>
             </button>
           ))}
-          {!available.length && <div className="p-2 text-[11px] text-fg-subtle">Tous les agents sont déjà dans l&apos;équipe.</div>}
+          {!available.length && <div className="p-2 text-[11px] text-fg-subtle">{t("Tous les agents sont déjà dans l'équipe.")}</div>}
         </div>
       </div>
       <div className="relative min-w-0 flex-1">
         <div className="pointer-events-none absolute left-3 right-3 top-3 z-10 flex items-start justify-between gap-3">
           <div className="rounded-lg bg-surface-1/90 px-3 py-2 text-[11px] leading-relaxed text-fg-muted backdrop-blur">
-            Tire un lien depuis le <b>point de droite</b> d&apos;un agent vers un autre : « peut lui déléguer du travail ».
+            {t("Tire un lien depuis le")} <b>{t("point de droite")}</b> {t("d'un agent vers un autre : « peut lui déléguer du travail ».")}
             <br />
-            Survole un agent : <Star size={10} className="inline" /> premier contact · <X size={10} className="inline" /> retirer. Clique un lien puis Suppr pour l&apos;effacer.
+            {t("Survole un agent :")} <Star size={10} className="inline" /> {t("premier contact")} · <X size={10} className="inline" /> {t("retirer.")}{" "}
+            {t("Clique un lien puis Suppr pour l'effacer.")}
           </div>
-          <Button size="sm" variant="soft" className="pointer-events-auto" onClick={() => onChange({ ...value, layout: {} })} title="Disposition automatique">
-            <LayoutGrid size={13} /> Réorganiser
+          <Button size="sm" variant="soft" className="pointer-events-auto" onClick={() => onChange({ ...value, layout: {} })} title={t("Disposition automatique")}>
+            <LayoutGrid size={13} /> {t("Réorganiser")}
           </Button>
         </div>
         <ReactFlowProvider>
@@ -254,7 +260,7 @@ export function TeamBuilder({ agents, value, onChange, onAgentCreated }: { agent
       </div>
       <ProfilePicker
         open={picker}
-        title="Ajouter un membre"
+        title={t("Ajouter un membre")}
         onClose={() => setPicker(false)}
         onPick={async (p) => {
           setPicker(false);

@@ -223,6 +223,8 @@ export async function runAgent(p: RunParams): Promise<string> {
     if (agent.tools?.includes("files_write") && !excluded.has("write_file")) sys.push(FILE_RULES);
     else if (agent.tools?.some((t) => t.startsWith("files_") || t === "run_command"))
       sys.push("## Dossier de travail\nTes outils fichiers et commandes agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour t'orienter.");
+    // Interface language set to English: answer in English (prompts stay French, models follow the instruction).
+    if (getSettings().language === "en") sys.push("## Language\nAlways answer in English, whatever the language of these instructions. Keep tool names and file paths unchanged.");
 
     // Everything below changes from call to call: it goes after the stable part of the prompt,
     // so Ollama can reuse its cache for the common prefix.

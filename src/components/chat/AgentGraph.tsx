@@ -19,6 +19,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { layoutOf, type Link } from "@/lib/team";
 import type { CallNode, Trace } from "@/lib/trace";
 import type { Agent } from "../api";
@@ -91,6 +92,7 @@ function Dots() {
 
 function AgentNode({ data }: NodeProps<Node<AgentData>>) {
   const { agent, call, lead, waitingOn, bubbleSide } = data;
+  const { t } = useT();
   const status: Status = call?.status ?? "idle";
   const live = !!call && !["done", "error"].includes(status);
   const lastTool = call?.tools.at(-1);
@@ -99,8 +101,8 @@ function AgentNode({ data }: NodeProps<Node<AgentData>>) {
   if (call) {
     if (status === "error") text = `⚠️ ${call.error}`;
     else if (call.text) text = call.text.length > 700 ? "…" + call.text.slice(-700) : call.text;
-    else if (status === "waiting") bubble = <span className="text-fg-muted">⏳ attend {waitingOn ?? "un coéquipier"}…</span>;
-    else if (status === "tool" && lastTool) bubble = <span className="text-fg-muted">{TOOL_LABEL[lastTool.name] ?? `🔧 ${lastTool.name}`}…</span>;
+    else if (status === "waiting") bubble = <span className="text-fg-muted">⏳ {t("attend {name}…", { name: waitingOn ?? t("un coéquipier") })}</span>;
+    else if (status === "tool" && lastTool) bubble = <span className="text-fg-muted">{TOOL_LABEL[lastTool.name] ? t(TOOL_LABEL[lastTool.name]) : `🔧 ${lastTool.name}`}…</span>;
     else if (live) bubble = <Dots />;
   }
   return (
@@ -132,7 +134,7 @@ function AgentNode({ data }: NodeProps<Node<AgentData>>) {
           <div className="truncate text-[11px] text-fg-muted">{agent.role}</div>
           <div className="mt-0.5 flex items-center gap-1 text-[10px]" style={{ color: live ? agent.color : "var(--fg-subtle)" }}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: live ? agent.color : status === "error" ? "#ef4444" : "var(--line-strong)" }} />
-            {STATUS_LABEL[status]}
+            {t(STATUS_LABEL[status])}
           </div>
         </div>
       </div>
@@ -141,6 +143,7 @@ function AgentNode({ data }: NodeProps<Node<AgentData>>) {
 }
 
 function UserNode({ data }: NodeProps<Node<UserData>>) {
+  const { t } = useT();
   return (
     <div className="relative">
       <Handle type="source" position={Position.Right} />
@@ -148,8 +151,8 @@ function UserNode({ data }: NodeProps<Node<UserData>>) {
       <div className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface-1 px-3 py-2.5 shadow-lg">
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-3 text-lg">🙂</span>
         <div>
-          <div className="text-sm font-semibold">Vous</div>
-          <div className="text-[11px] text-fg-muted">{data.active ? "en attente de la réponse" : "prêt"}</div>
+          <div className="text-sm font-semibold">{t("Vous")}</div>
+          <div className="text-[11px] text-fg-muted">{data.active ? t("en attente de la réponse") : t("prêt")}</div>
         </div>
       </div>
     </div>
