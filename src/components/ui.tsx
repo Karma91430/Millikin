@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useT } from "@/i18n";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -72,6 +73,7 @@ export function Avatar({ emoji, color, size = 36 }: { emoji: string; color: stri
 }
 
 export function Drawer({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const { t } = useT();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]" onMouseDown={onClose}>
@@ -81,7 +83,7 @@ export function Drawer({ open, onClose, title, children, footer, wide }: { open:
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div className="text-base font-semibold">{title}</div>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Fermer">
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label={t("Fermer")}>
             <X size={16} />
           </Button>
         </div>
@@ -93,13 +95,14 @@ export function Drawer({ open, onClose, title, children, footer, wide }: { open:
 }
 
 export function Modal({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode }) {
+  const { t } = useT();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]" onMouseDown={onClose}>
       <div className="w-full max-w-lg rounded-2xl border border-line bg-surface-0 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 pt-4">
           <div className="text-base font-semibold">{title}</div>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Fermer">
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label={t("Fermer")}>
             <X size={16} />
           </Button>
         </div>
@@ -124,7 +127,8 @@ export function Pick<T extends { id: string }>({
   render: (item: T) => ReactNode;
   empty?: string;
 }) {
-  if (!items.length) return <div className="text-xs text-fg-subtle">{empty ?? "Rien à sélectionner"}</div>;
+  const { t } = useT();
+  if (!items.length) return <div className="text-xs text-fg-subtle">{empty ?? t("Rien à sélectionner")}</div>;
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((it) => {

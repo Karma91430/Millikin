@@ -2,6 +2,7 @@
 
 import { Download, Play, Plus, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n";
 import { api, crud, formatBytes, useData, type Provider } from "../api";
 import { Badge, Button, Card, cx, ErrorNote, Field, Input, PageHeader } from "../ui";
 
@@ -23,6 +24,7 @@ const SUGGESTED: [string, string][] = [
 const CAP_COLOR: Record<string, string> = { tools: "#10b981", thinking: "#8b5cf6", vision: "#06b6d4", embedding: "#f59e0b", completion: "#64748b" };
 
 export function ModelsView({ onChange }: { onChange: () => void }) {
+  const { t } = useT();
   const [tab, setTab] = useState<"models" | "usage" | "hosts" | "proxy">("models");
   const providers = useData<Provider[]>("/api/crud/providers");
   const [host, setHost] = useState<string>("");
@@ -30,8 +32,8 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
   return (
     <div>
       <PageHeader
-        title="Modèles"
-        subtitle="Tout tourne en local sur Ollama. Millikin suit chaque appel et expose un proxy compatible OpenAI."
+        title={t("Modèles")}
+        subtitle={t("Tout tourne en local sur Ollama. Millikin suit chaque appel et expose un proxy compatible OpenAI.")}
         actions={
           <div className="flex rounded-lg border border-line p-0.5">
             {(
@@ -43,7 +45,7 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
               ] as const
             ).map(([id, label]) => (
               <button key={id} onClick={() => setTab(id)} className={cx("rounded-md px-3 py-1 text-sm", tab === id ? "bg-surface-3 text-fg" : "text-fg-muted")}>
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
@@ -60,6 +62,7 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
 }
 
 function Models({ hostId, providers, onHost, onChange }: { hostId: string; providers: Provider[]; onHost: (id: string) => void; onChange: () => void }) {
+  const { t } = useT();
   const st = useData<OllamaState>(`/api/ollama?providerId=${hostId}`);
   const [pull, setPull] = useState("");
   const [progress, setProgress] = useState<{ model: string; status: string; pct?: number } | null>(null);
@@ -74,16 +77,16 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
 
   // Loaded models and CLI-side changes show up without a manual refresh.
   useEffect(() => {
-    const t = setInterval(st.reload, 10000);
-    return () => clearInterval(t);
+    const timer = setInterval(st.reload, 10000);
+    return () => clearInterval(timer);
   }, [st.reload]);
 
   /** Re-read the installed models from Ollama and sync the catalog used by agent/model pickers. */
   async function refresh() {
-    setSyncMsg("synchronisation…");
+    setSyncMsg(t("synchronisation…"));
     try {
       const r = await api<{ added: number; total: number }>("/api/ollama", { method: "POST", json: { action: "sync", providerId: hostId } });
-      setSyncMsg(`✓ ${r.total} modèle(s) sur Ollama${r.added ? `, ${r.added} nouveau(x)` : ""}`);
+      setSyncMsg(t("✓ {total} modèle(s) sur Ollama", { total: r.total }) + (r.added ? t(", {added} nouveau(x)", { added: r.added }) : ""));
       st.reload();
       onChange();
     } catch (e) {
@@ -97,7 +100,7 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
     if (!name || progress) return;
     setError(undefined);
     setDone(null);
-    setProgress({ model: name, status: "démarrage…" });
+    setProgress({ model: name, status: t("démarrage…") });
     const ctrl = new AbortController();
     pullCtrl.current = ctrl;
     try {
@@ -121,17 +124,17 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
         for (const l of lines) {
           if (!l.trim()) continue;
           const j = JSON.parse(l) as { status?: string; total?: number; completed?: number; error?: string };
-          if (j.error) throw new Error(j.error.includes("file does not exist") ? `« ${name} » n'existe pas dans la bibliothèque Ollama (vérifie le nom et le tag).` : j.error);
+          if (j.error) throw new Error(j.error.includes("file does not exist") ? t("« {name} » n'existe pas dans la bibliothèque Ollama (vérifie le nom et le tag).", { name }) : j.error);
           if (j.status === "success") ok = true;
           setProgress({ model: name, status: j.status ?? "", pct: j.total ? Math.round(((j.completed ?? 0) / j.total) * 100) : undefined });
         }
       }
-      if (!ok) throw new Error("Téléchargement interrompu avant la fin");
+      if (!ok) throw new Error(t("Téléchargement interrompu avant la fin"));
       setPull("");
       setDone(name);
       await refresh();
     } catch (e) {
-      setError(ctrl.signal.aborted ? `Téléchargement de ${name} annulé.` : e instanceof Error ? e.message : String(e));
+      setError(ctrl.signal.aborted ? t("Téléchargement de {name} annulé.", { name }) : e instanceof Error ? e.message : String(e));
     } finally {
       setProgress(null);
       pullCtrl.current = null;
@@ -151,28 +154,28 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
           </select>
         )}
         <span className="text-sm text-fg-muted">
-          {st.data ? `${st.data.provider.name} · Ollama ${st.data.version ?? "?"} · ${st.data.installed.length} modèles` : st.error ? "" : "Connexion…"}
+          {st.data ? `${st.data.provider.name} · Ollama ${st.data.version ?? "?"} · ${t("{n} modèles", { n: st.data.installed.length })}` : st.error ? "" : t("Connexion…")}
         </span>
-        <Button size="sm" variant="soft" onClick={refresh} title="Relire les modèles installés sur Ollama et mettre à jour les listes de modèles de l'appli">
-          <RefreshCw size={13} /> Rafraîchir depuis Ollama
+        <Button size="sm" variant="soft" onClick={refresh} title={t("Relire les modèles installés sur Ollama et mettre à jour les listes de modèles de l'appli")}>
+          <RefreshCw size={13} /> {t("Rafraîchir depuis Ollama")}
         </Button>
         {syncMsg && <span className="text-xs text-fg-muted">{syncMsg}</span>}
       </div>
-      <ErrorNote>{st.error && `Ollama injoignable : ${st.error}. Lance « ollama serve » ou vérifie l'hôte.`}</ErrorNote>
+      <ErrorNote>{st.error && t("Ollama injoignable : {error}. Lance « ollama serve » ou vérifie l'hôte.", { error: st.error })}</ErrorNote>
       <ErrorNote>{error}</ErrorNote>
 
       <Card className="flex flex-col gap-3 p-3">
         <div className="flex flex-wrap items-end gap-2">
           <Field
-            label="Télécharger un modèle (ollama pull)"
+            label={t("Télécharger un modèle (ollama pull)")}
             className="min-w-64 flex-1"
             hint={
               <>
-                Nom et tag de la{" "}
+                {t("Nom et tag de la")}{" "}
                 <a href="https://ollama.com/library" target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                  bibliothèque Ollama
+                  {t("bibliothèque Ollama")}
                 </a>
-                , ex : qwen3:14b, llama3.1:8b, bge-m3. Attention à la place disque et à la mémoire.
+                {t(", ex : qwen3:14b, llama3.1:8b, bge-m3. Attention à la place disque et à la mémoire.")}
               </>
             }
           >
@@ -180,22 +183,22 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
           </Field>
           {progress ? (
             <Button variant="danger" onClick={() => pullCtrl.current?.abort()}>
-              Annuler
+              {t("Annuler")}
             </Button>
           ) : (
             <Button variant="primary" onClick={() => doPull()} disabled={!pull.trim()}>
-              <Download size={14} /> Télécharger
+              <Download size={14} /> {t("Télécharger")}
             </Button>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-fg-subtle">Suggestions :</span>
+          <span className="text-[11px] text-fg-subtle">{t("Suggestions :")}</span>
           {SUGGESTED.map(([name, why]) => (
             <button
               key={name}
               disabled={!!progress || installed.has(name)}
               onClick={() => (setPull(name), doPull(name))}
-              title={installed.has(name) ? "déjà installé" : why}
+              title={installed.has(name) ? t("déjà installé") : t(why)}
               className={cx(
                 "rounded-md border px-2 py-0.5 font-mono text-[11px]",
                 installed.has(name) ? "border-emerald-500/30 text-emerald-400" : "border-line text-fg-muted hover:border-line-strong hover:text-fg",
@@ -219,17 +222,17 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
             </div>
           </div>
         )}
-        {done && <div className="text-xs text-emerald-400">✓ {done} est installé et disponible dans les listes de modèles.</div>}
+        {done && <div className="text-xs text-emerald-400">{t("✓ {name} est installé et disponible dans les listes de modèles.", { name: done })}</div>}
       </Card>
 
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-fg-subtle">
             <tr className="border-b border-line">
-              <th className="px-3 py-2 font-medium">Modèle</th>
-              <th className="px-3 py-2 font-medium">Taille</th>
-              <th className="px-3 py-2 font-medium">Capacités</th>
-              <th className="px-3 py-2 font-medium">Mémoire</th>
+              <th className="px-3 py-2 font-medium">{t("Modèle")}</th>
+              <th className="px-3 py-2 font-medium">{t("Taille")}</th>
+              <th className="px-3 py-2 font-medium">{t("Capacités")}</th>
+              <th className="px-3 py-2 font-medium">{t("Mémoire")}</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -258,7 +261,7 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
                   <td className="px-3 py-2.5 text-xs">
                     {l ? (
                       <span className="text-emerald-400">
-                        ● chargé · {formatBytes(l.size_vram || l.size)}
+                        ● {t("chargé")} · {formatBytes(l.size_vram || l.size)}
                         {l.context_length ? ` · ctx ${l.context_length}` : ""}
                       </span>
                     ) : (
@@ -271,14 +274,14 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
                         <Button
                           size="sm"
                           variant="ghost"
-                          title="Tester"
+                          title={t("Tester")}
                           onClick={async () => {
-                            setTests((t) => ({ ...t, [m.name]: "test en cours…" }));
+                            setTests((x) => ({ ...x, [m.name]: t("test en cours…") }));
                             const r = await api<{ ok: boolean; reply?: string; error?: string; latency_ms: number }>("/api/gateway/test", {
                               method: "POST",
                               json: { model: `${providers.find((p) => p.id === hostId)?.slug}/${m.name}` },
                             }).catch((e) => ({ ok: false, error: String(e.message), latency_ms: 0, reply: undefined }));
-                            setTests((t) => ({ ...t, [m.name]: r.ok ? `✓ « ${r.reply} » en ${(r.latency_ms / 1000).toFixed(1)} s` : `✗ ${r.error}` }));
+                            setTests((x) => ({ ...x, [m.name]: r.ok ? t("✓ « {reply} » en {s} s", { reply: r.reply ?? "", s: (r.latency_ms / 1000).toFixed(1) }) : `✗ ${r.error}` }));
                             st.reload();
                           }}
                         >
@@ -286,16 +289,16 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
                         </Button>
                       )}
                       {l && (
-                        <Button size="sm" variant="ghost" title="Décharger de la mémoire" onClick={async () => (await act("unload", m.name), st.reload())}>
+                        <Button size="sm" variant="ghost" title={t("Décharger de la mémoire")} onClick={async () => (await act("unload", m.name), st.reload())}>
                           <Power size={13} />
                         </Button>
                       )}
                       <Button
                         size="sm"
                         variant="ghost"
-                        title="Supprimer du disque"
+                        title={t("Supprimer du disque")}
                         onClick={async () => {
-                          if (!confirm(`Supprimer ${m.name} du disque (${formatBytes(m.size)}) ?`)) return;
+                          if (!confirm(t("Supprimer {name} du disque ({size}) ?", { name: m.name, size: formatBytes(m.size) }))) return;
                           await act("delete", m.name);
                           st.reload();
                           onChange();
@@ -312,7 +315,7 @@ function Models({ hostId, providers, onHost, onChange }: { hostId: string; provi
         </table>
       </Card>
       <p className="text-xs text-fg-subtle">
-        Pour les agents, privilégie les modèles avec le badge <b>tools</b>. Les modèles <b>embedding</b> servent au RAG (réglable dans Réglages).
+        {t("Pour les agents, privilégie les modèles avec le badge « tools ».")} {t("Les modèles « embedding » servent au RAG (réglable dans Réglages).")}
       </p>
     </div>
   );
@@ -326,32 +329,33 @@ type UsageData = {
 };
 
 function Usage() {
+  const { t } = useT();
   const [days, setDays] = useState(7);
   const u = useData<UsageData>(`/api/gateway/usage?days=${days}`);
-  const t = u.data?.totals;
+  const tot = u.data?.totals;
   const n = (x: number) => Math.round(x || 0).toLocaleString("fr-FR");
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-1">
         {[1, 7, 30].map((d) => (
           <Button key={d} size="sm" variant={days === d ? "soft" : "ghost"} onClick={() => setDays(d)}>
-            {d === 1 ? "24 h" : `${d} jours`}
+            {d === 1 ? t("24 h") : t("{d} jours", { d })}
           </Button>
         ))}
         <Button size="sm" variant="ghost" onClick={u.reload}>
           <RefreshCw size={13} />
         </Button>
       </div>
-      {t && (
+      {tot && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[
-            ["Appels", n(t.calls)],
-            ["Tokens entrée / sortie", `${n(t.prompt_tokens)} / ${n(t.completion_tokens)}`],
-            ["Latence moyenne", `${(t.avg_latency / 1000).toFixed(1)} s`],
-            ["Erreurs", n(t.errors)],
+            ["Appels", n(tot.calls)],
+            ["Tokens entrée / sortie", `${n(tot.prompt_tokens)} / ${n(tot.completion_tokens)}`],
+            ["Latence moyenne", `${(tot.avg_latency / 1000).toFixed(1)} s`],
+            ["Erreurs", n(tot.errors)],
           ].map(([label, value]) => (
             <Card key={label} className="p-3">
-              <div className="text-xs text-fg-muted">{label}</div>
+              <div className="text-xs text-fg-muted">{t(label)}</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
             </Card>
           ))}
@@ -359,13 +363,13 @@ function Usage() {
       )}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-x-auto">
-          <div className="border-b border-line px-3 py-2 text-sm font-medium">Par modèle</div>
+          <div className="border-b border-line px-3 py-2 text-sm font-medium">{t("Par modèle")}</div>
           <table className="w-full text-xs">
             <tbody>
               {u.data?.byModel.map((m) => (
                 <tr key={m.model} className="border-b border-line last:border-0">
                   <td className="px-3 py-2 font-mono">{m.model}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{n(m.calls)} appels</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{t("{n} appels", { n: n(m.calls) })}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{n(m.prompt_tokens + m.completion_tokens)} tok</td>
                   <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{(m.avg_latency / 1000).toFixed(1)} s</td>
                 </tr>
@@ -374,15 +378,15 @@ function Usage() {
           </table>
         </Card>
         <Card className="overflow-x-auto">
-          <div className="border-b border-line px-3 py-2 text-sm font-medium">Par agent</div>
+          <div className="border-b border-line px-3 py-2 text-sm font-medium">{t("Par agent")}</div>
           <table className="w-full text-xs">
             <tbody>
               {u.data?.byAgent.map((a) => (
                 <tr key={a.agent_id} className="border-b border-line last:border-0">
                   <td className="px-3 py-2">
-                    {a.emoji ?? "🤖"} {a.name ?? "agent supprimé"}
+                    {a.emoji ?? "🤖"} {a.name ?? t("agent supprimé")}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{n(a.calls)} appels</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{t("{n} appels", { n: n(a.calls) })}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{n(a.tokens)} tok</td>
                   <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{(a.avg_latency / 1000).toFixed(1)} s</td>
                 </tr>
@@ -392,7 +396,7 @@ function Usage() {
         </Card>
       </div>
       <Card className="overflow-x-auto">
-        <div className="border-b border-line px-3 py-2 text-sm font-medium">Derniers appels</div>
+        <div className="border-b border-line px-3 py-2 text-sm font-medium">{t("Derniers appels")}</div>
         <table className="w-full text-xs">
           <tbody>
             {u.data?.recent.map((r) => (
@@ -405,7 +409,7 @@ function Usage() {
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-fg-muted">{(r.latency_ms / 1000).toFixed(1)} s</td>
                 <td className="px-3 py-1.5" title={r.error}>
-                  {r.status === "ok" ? <span className="text-emerald-400">ok</span> : <span className="text-red-400">erreur</span>}
+                  {r.status === "ok" ? <span className="text-emerald-400">ok</span> : <span className="text-red-400">{t("erreur")}</span>}
                 </td>
               </tr>
             ))}
@@ -417,11 +421,14 @@ function Usage() {
 }
 
 function Hosts({ providers, reload }: { providers: Provider[]; reload: () => void }) {
+  const { t } = useT();
   const [draft, setDraft] = useState({ slug: "", name: "", base_url: "http://192.168.1.10:11434" });
   const [msg, setMsg] = useState<string>();
   return (
     <div className="flex max-w-3xl flex-col gap-3">
-      <p className="text-sm text-fg-muted">Un hôte = une instance Ollama. Ajoute une autre machine du réseau (ex : un PC avec GPU) pour y faire tourner de plus gros modèles.</p>
+      <p className="text-sm text-fg-muted">
+        {t("Un hôte = une instance Ollama. Ajoute une autre machine du réseau (ex : un PC avec GPU) pour y faire tourner de plus gros modèles.")}
+      </p>
       {providers.map((p) => (
         <Card key={p.id} className="flex flex-wrap items-center gap-3 p-3">
           <span className={cx("h-2 w-2 rounded-full", p.enabled ? "bg-emerald-400" : "bg-fg-subtle")} />
@@ -435,21 +442,21 @@ function Hosts({ providers, reload }: { providers: Provider[]; reload: () => voi
             size="sm"
             onClick={async () => {
               const r = await api<{ total?: number }>("/api/ollama", { method: "POST", json: { action: "sync", providerId: p.id } }).catch((e) => ({ error: String(e.message) }));
-              setMsg("error" in r ? `${p.name} : ${r.error}` : `${p.name} : ${r.total} modèles synchronisés`);
+              setMsg("error" in r ? `${p.name} : ${r.error}` : t("{name} : {n} modèles synchronisés", { name: p.name, n: r.total ?? 0 }));
               reload();
             }}
           >
-            <RefreshCw size={13} /> Synchroniser
+            <RefreshCw size={13} /> {t("Synchroniser")}
           </Button>
           <Button size="sm" variant="ghost" onClick={async () => (await crud.save("providers", { id: p.id, enabled: !p.enabled }), reload())}>
-            {p.enabled ? "Désactiver" : "Activer"}
+            {p.enabled ? t("Désactiver") : t("Activer")}
           </Button>
           {providers.length > 1 && (
             <Button
               size="sm"
               variant="ghost"
               onClick={async () => {
-                if (!confirm(`Retirer l'hôte ${p.name} ?`)) return;
+                if (!confirm(t("Retirer l'hôte {name} ?", { name: p.name }))) return;
                 await crud.remove("providers", p.id);
                 reload();
               }}
@@ -461,10 +468,10 @@ function Hosts({ providers, reload }: { providers: Provider[]; reload: () => voi
       ))}
       {msg && <div className="text-sm text-fg-muted">{msg}</div>}
       <Card className="grid gap-2 p-3 sm:grid-cols-[120px_1fr_1.4fr_auto] sm:items-end">
-        <Field label="Identifiant">
+        <Field label={t("Identifiant")}>
           <Input value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="gpu" />
         </Field>
-        <Field label="Nom">
+        <Field label={t("Nom")}>
           <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="PC GPU" />
         </Field>
         <Field label="URL">
@@ -479,7 +486,7 @@ function Hosts({ providers, reload }: { providers: Provider[]; reload: () => voi
             reload();
           }}
         >
-          <Plus size={14} /> Ajouter
+          <Plus size={14} /> {t("Ajouter")}
         </Button>
       </Card>
     </div>
@@ -487,29 +494,32 @@ function Hosts({ providers, reload }: { providers: Provider[]; reload: () => voi
 }
 
 function Proxy() {
+  const { t } = useT();
   const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3210";
   const curl = `curl ${origin}/api/v1/chat/completions \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer <clé-proxy-si-définie>" \\
-  -d '{"model": "ollama/qwen3:8b", "messages": [{"role": "user", "content": "Bonjour"}]}'`;
+  -H "Authorization: Bearer ${t("<clé-proxy-si-définie>")}" \\
+  -d '{"model": "ollama/qwen3:8b", "messages": [{"role": "user", "content": "${t("Bonjour")}"}]}'`;
   return (
     <div className="flex max-w-3xl flex-col gap-4">
       <p className="text-sm text-fg-muted">
-        Comme LiteLLM : tes autres outils (IDE, scripts, n8n, Open WebUI…) peuvent appeler tes modèles locaux via une API compatible OpenAI. Chaque appel apparaît dans
-        l&apos;onglet Utilisation.
+        {t(
+          "Comme LiteLLM : tes autres outils (IDE, scripts, n8n, Open WebUI…) peuvent appeler tes modèles locaux via une API compatible OpenAI. Chaque appel apparaît dans l'onglet Utilisation.",
+        )}
       </p>
       <Card className="flex flex-col gap-2 p-4 text-sm">
         <div>
-          <span className="text-fg-muted">Base URL :</span> <code className="font-mono">{origin}/api/v1</code>
+          <span className="text-fg-muted">{t("Base URL :")}</span> <code className="font-mono">{origin}/api/v1</code>
         </div>
         <div>
-          <span className="text-fg-muted">Routes :</span> <code className="font-mono">/chat/completions</code>, <code className="font-mono">/embeddings</code>,{" "}
+          <span className="text-fg-muted">{t("Routes :")}</span> <code className="font-mono">/chat/completions</code>, <code className="font-mono">/embeddings</code>,{" "}
           <code className="font-mono">/models</code>
         </div>
         <div>
-          <span className="text-fg-muted">Nom de modèle :</span> <code className="font-mono">hôte/modèle</code> (ex : <code className="font-mono">ollama/qwen3:8b</code>) ou nom seul
+          <span className="text-fg-muted">{t("Nom de modèle :")}</span> <code className="font-mono">{t("hôte/modèle")}</code> ({t("ex :")}{" "}
+          <code className="font-mono">ollama/qwen3:8b</code>) {t("ou nom seul")}
         </div>
-        <div className="text-fg-muted">Clé : optionnelle, à définir dans Réglages → Clé du proxy.</div>
+        <div className="text-fg-muted">{t("Clé : optionnelle, à définir dans Réglages → Clé du proxy.")}</div>
       </Card>
       <pre className="overflow-x-auto rounded-xl border border-line bg-surface-1 p-4 font-mono text-xs">{curl}</pre>
     </div>

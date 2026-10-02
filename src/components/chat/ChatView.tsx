@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { specFromTeam } from "@/lib/team";
 import { applyEvent, emptyTrace, type Trace, type TraceEvent } from "@/lib/trace";
 import { api, useData, type Agent, type Conversation, type Message, type Project, type RunInfo } from "../api";
+import { useT } from "@/i18n";
 import { Button, cx, Empty, Select } from "../ui";
 import { AgentGraph } from "./AgentGraph";
 import { CallFocus } from "./CallFocus";
@@ -26,11 +27,12 @@ type Props = {
 
 export function ChatView(props: Props) {
   const { agents, projects, target } = props;
+  const { t } = useT();
   const effective = target ?? (projects[0] ? { type: "project" as const, id: projects[0].id } : agents[0] ? { type: "agent" as const, id: agents[0].id } : null);
   if (!effective)
     return (
-      <Empty title="Aucun agent pour l'instant" icon={<MessageSquarePlus size={28} />}>
-        Crée un projet (à partir d&apos;un modèle d&apos;équipe) ou un agent pour commencer à discuter.
+      <Empty title={t("Aucun agent pour l'instant")} icon={<MessageSquarePlus size={28} />}>
+        {t("Crée un projet (à partir d'un modèle d'équipe) ou un agent pour commencer à discuter.")}
       </Empty>
     );
   // One session per target (and per explicitly requested conversation).
@@ -38,6 +40,7 @@ export function ChatView(props: Props) {
 }
 
 function ChatSession({ agents, projects, onTarget, onNewProject, effective, viewingRef, onRunsChanged }: Props & { effective: Target }) {
+  const { t } = useT();
   const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const project = effective.type === "project" ? projects.find((p) => p.id === effective.id) : undefined;
   const spec = useMemo(() => (project ? specFromTeam(project.team) : null), [project]);
@@ -240,9 +243,9 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
   const focusTrace = focus ? (live?.calls[focus] ? live : messages.find((m) => m.trace?.calls[focus])?.trace) : undefined;
 
   const expandAgent = (agentId: string) => {
-    const t = graphTrace;
-    const call = t?.order
-      .map((id) => t.calls[id])
+    const tr = graphTrace;
+    const call = tr?.order
+      .map((id) => tr.calls[id])
       .filter((c) => c?.agentId === agentId)
       .at(-1);
     if (call) setFocus(call.callId);
@@ -255,8 +258,8 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
 
   if (!lead)
     return (
-      <Empty title="Aucun premier contact">
-        {project ? "Définis au moins un premier contact (★) dans l'onglet Équipe du projet." : "Agent introuvable."}
+      <Empty title={t("Aucun premier contact")}>
+        {project ? t("Définis au moins un premier contact (★) dans l'onglet Équipe du projet.") : t("Agent introuvable.")}
       </Empty>
     );
 
@@ -266,8 +269,8 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
       {showList && (
         <aside className="hidden w-60 shrink-0 flex-col border-r border-line lg:flex">
           <div className="flex items-center justify-between px-3 py-3">
-            <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Conversations</span>
-            <Button size="sm" variant="ghost" title="Nouvelle conversation" onClick={() => openConversation(null)}>
+            <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Conversations")}</span>
+            <Button size="sm" variant="ghost" title={t("Nouvelle conversation")} onClick={() => openConversation(null)}>
               <MessageSquarePlus size={15} />
             </Button>
           </div>
@@ -281,13 +284,13 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
                   c.id === conversationId ? "bg-surface-3 text-fg" : "text-fg-muted hover:bg-surface-2",
                 )}
               >
-                <span className="flex-1 truncate">{c.title || "Sans titre"}</span>
+                <span className="flex-1 truncate">{c.title || t("Sans titre")}</span>
                 <button
                   className="hidden text-fg-subtle hover:text-red-400 group-hover:block"
-                  title="Supprimer"
+                  title={t("Supprimer")}
                   onClick={async (e) => {
                     e.stopPropagation();
-                    if (!confirm("Supprimer cette conversation ?")) return;
+                    if (!confirm(t("Supprimer cette conversation ?"))) return;
                     await api(`/api/conversations?id=${c.id}`, { method: "DELETE" });
                     if (c.id === conversationId) openConversation(null);
                     convs.reload();
@@ -297,7 +300,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
                 </button>
               </div>
             ))}
-            {!convs.data?.length && <div className="px-2.5 py-2 text-xs text-fg-subtle">Aucune conversation</div>}
+            {!convs.data?.length && <div className="px-2.5 py-2 text-xs text-fg-subtle">{t("Aucune conversation")}</div>}
           </div>
         </aside>
       )}
@@ -305,7 +308,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
       {/* graph */}
       <section className="relative hidden min-w-0 flex-1 md:block">
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
-          <Button size="sm" variant="soft" onClick={() => setShowList(!showList)} className="hidden lg:inline-flex" title="Conversations">
+          <Button size="sm" variant="soft" onClick={() => setShowList(!showList)} className="hidden lg:inline-flex" title={t("Conversations")}>
             {showList ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
           </Button>
           <Select
@@ -317,15 +320,15 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
               onTarget({ type: type as Target["type"], id });
             }}
           >
-            <optgroup label="Projets">
+            <optgroup label={t("Projets")}>
               {projects.map((p) => (
                 <option key={p.id} value={`project:${p.id}`}>
                   📁 {p.name}
                 </option>
               ))}
-              <option value="new:">➕ Nouveau projet…</option>
+              <option value="new:">➕ {t("Nouveau projet…")}</option>
             </optgroup>
-            <optgroup label="Agents seuls">
+            <optgroup label={t("Agents seuls")}>
               {agents.map((a) => (
                 <option key={a.id} value={`agent:${a.id}`}>
                   {a.emoji} {a.name}
@@ -334,7 +337,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
             </optgroup>
           </Select>
         </div>
-        <div className="absolute bottom-3 right-3 z-10 text-[11px] text-fg-subtle">Clique sur un agent pour agrandir sa réponse</div>
+        <div className="absolute bottom-3 right-3 z-10 text-[11px] text-fg-subtle">{t("Clique sur un agent pour agrandir sa réponse")}</div>
         <AgentGraph
           agents={teamAgents}
           entries={entries}
@@ -354,15 +357,15 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{project?.name ?? lead.name}</div>
             <div className="truncate text-xs text-fg-muted">
-              {project ? `Premiers contacts : ${[lead, ...coLeads].map((a) => a.name).join(" + ")} · ${teamAgents.length} agents` : lead.role}
+              {project ? t("Premiers contacts : {names} · {n} agents", { names: [lead, ...coLeads].map((a) => a.name).join(" + "), n: teamAgents.length }) : lead.role}
             </div>
           </div>
-          {planning && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">planification</span>}
-          {phase === "cadrage" && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-400">cadrage</span>}
-          {phase === "execution" && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-400">réalisation</span>}
+          {planning && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">{t("planification")}</span>}
+          {phase === "cadrage" && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-400">{t("cadrage")}</span>}
+          {phase === "execution" && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-400">{t("réalisation")}</span>}
           {running && (
             <span className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> en cours
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> {t("en cours")}
             </span>
           )}
         </div>
@@ -381,24 +384,25 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
               <div className="rounded-xl border border-dashed border-line p-4 text-sm text-fg-muted">
                 {project && planning ? (
                   <>
-                    <b className="text-fg">Cadrage avant planification.</b> Présente ton projet en quelques phrases, sans tout détailler :{" "}
-                    <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b> vont te poser leurs questions (objectif, périmètre, priorités,
-                    contraintes). Quand tout est clair, clique sur « Valider et créer les tâches » : ils découperont le projet en tâches et en sprints à partir de
-                    votre échange.
+                    <b className="text-fg">{t("Cadrage avant planification.")}</b> {t("Présente ton projet en quelques phrases, sans tout détailler :")}{" "}
+                    <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(t(" et "))}</b>{" "}
+                    {t(
+                      "vont te poser leurs questions (objectif, périmètre, priorités, contraintes). Quand tout est clair, clique sur « Valider et créer les tâches » : ils découperont le projet en tâches et en sprints à partir de votre échange.",
+                    )}
                   </>
                 ) : project ? (
                   <>
-                    Présente ton idée ou ta demande à <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(" et ")}</b>.
+                    {t("Présente ton idée ou ta demande à")} <b className="text-fg">{[lead, ...coLeads].map((a) => a.name).join(t(" et "))}</b>.{" "}
                     {spec?.clarify
-                      ? " Ils commencent par cadrer : analyse, approche et questions. Quand tout est clair, valide pour qu'ils répartissent le travail et contrôlent les résultats."
-                      : " Ils délèguent aux spécialistes selon les liens de l'équipe."}
+                      ? t("Ils commencent par cadrer : analyse, approche et questions. Quand tout est clair, valide pour qu'ils répartissent le travail et contrôlent les résultats.")
+                      : t("Ils délèguent aux spécialistes selon les liens de l'équipe.")}
                   </>
                 ) : (
                   <>
-                    Pose ta question à <b className="text-fg">{lead.name}</b>.
+                    {t("Pose ta question à")} <b className="text-fg">{lead.name}</b>.
                   </>
                 )}{" "}
-                Tu peux changer d&apos;écran pendant qu&apos;ils travaillent : la réponse continue en arrière-plan.
+                {t("Tu peux changer d'écran pendant qu'ils travaillent : la réponse continue en arrière-plan.")}
               </div>
             )}
             {messages.map((m) =>
@@ -416,7 +420,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
               onClick={toBottom}
               className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-lg shadow-black/40 hover:brightness-110"
             >
-              <ArrowDown size={12} /> {running ? "Suivre la réponse" : "Aller en bas"}
+              <ArrowDown size={12} /> {running ? t("Suivre la réponse") : t("Aller en bas")}
             </button>
           )}
         </div>
@@ -425,8 +429,8 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
             <div className="mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
               <span className="flex-1 text-xs text-amber-200">
                 {planning
-                  ? "Réponds aux questions, ou valide quand le cadrage te convient : l'équipe créera les tâches."
-                  : "Phase de cadrage : réponds aux questions ci-dessus, ou valide pour lancer la réalisation."}
+                  ? t("Réponds aux questions, ou valide quand le cadrage te convient : l'équipe créera les tâches.")
+                  : t("Phase de cadrage : réponds aux questions ci-dessus, ou valide pour lancer la réalisation.")}
               </span>
               <Button
                 size="sm"
@@ -435,7 +439,7 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
                   send(planning ? "✅ Validé : crée les tâches à partir de notre échange." : "✅ Validé : lance la réalisation en tenant compte de nos échanges.", true)
                 }
               >
-                <CheckCircle2 size={13} /> {planning ? "Valider et créer les tâches" : "Valider et lancer"}
+                <CheckCircle2 size={13} /> {planning ? t("Valider et créer les tâches") : t("Valider et lancer")}
               </Button>
             </div>
           )}
@@ -451,15 +455,15 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
               }}
               ref={inputRef}
               rows={1}
-              placeholder={running ? "Réponse en cours…" : `Message à ${lead.name}…`}
+              placeholder={running ? t("Réponse en cours…") : t("Message à {name}…", { name: lead.name })}
               className="flex-1 resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-fg-subtle"
             />
             {running ? (
-              <Button variant="danger" size="sm" onClick={stop} disabled={!runId} title="Arrêter la réponse">
+              <Button variant="danger" size="sm" onClick={stop} disabled={!runId} title={t("Arrêter la réponse")}>
                 <Square size={13} />
               </Button>
             ) : (
-              <Button variant="primary" size="sm" onClick={() => send()} disabled={!input.trim()} title="Envoyer">
+              <Button variant="primary" size="sm" onClick={() => send()} disabled={!input.trim()} title={t("Envoyer")}>
                 <Send size={13} />
               </Button>
             )}

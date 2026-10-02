@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Plug, Plus, Trash2, XCircle } from "lucide-react";
 import { useState } from "react";
+import { useT } from "@/i18n";
 import { api, crud, useData, type McpServer } from "../api";
 import { Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, PageHeader, Select, Textarea } from "../ui";
 
@@ -47,16 +48,17 @@ const fromHeaderLines = (s: string) =>
   );
 
 export function McpView() {
+  const { t } = useT();
   const servers = useData<McpServer[]>("/api/crud/mcp");
   const [cur, setCur] = useState<Partial<McpServer> | null>(null);
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Serveurs MCP"
-        subtitle="Branche des outils externes (fichiers, Git, navigateur, GitHub, Jira…) et attache-les aux agents qui en ont besoin."
+        title={t("Serveurs MCP")}
+        subtitle={t("Branche des outils externes (fichiers, Git, navigateur, GitHub, Jira…) et attache-les aux agents qui en ont besoin.")}
         actions={
           <Button variant="primary" onClick={() => setCur({ name: "", transport: "stdio", command: "", args: [], env: {}, url: "", headers: {}, enabled: true })}>
-            <Plus size={15} /> Nouveau serveur
+            <Plus size={15} /> {t("Nouveau serveur")}
           </Button>
         }
       />
@@ -72,23 +74,23 @@ export function McpView() {
               <div className="mt-1 truncate font-mono text-[11px] text-fg-subtle">{s.transport === "stdio" ? `${s.command} ${s.args.join(" ")}` : s.url}</div>
             </Card>
           ))}
-          <div className="mt-2 text-xs font-medium uppercase tracking-wide text-fg-subtle">Modèles</div>
+          <div className="mt-2 text-xs font-medium uppercase tracking-wide text-fg-subtle">{t("Modèles de serveurs")}</div>
           {PRESETS.map((p) => (
             <button
               key={p.label}
               onClick={() => setCur({ args: [], env: {}, headers: {}, url: "", command: "", enabled: true, ...p.server })}
               className="rounded-lg border border-dashed border-line px-3 py-2 text-left hover:border-line-strong"
             >
-              <div className="text-sm">{p.label}</div>
-              <div className="text-[11px] text-fg-subtle">{p.hint}</div>
+              <div className="text-sm">{t(p.label)}</div>
+              <div className="text-[11px] text-fg-subtle">{t(p.hint)}</div>
             </button>
           ))}
         </div>
         {cur ? (
           <McpEditor key={cur.id ?? `new-${cur.name}`} initial={cur} onSaved={(s) => (setCur(s), servers.reload())} onDeleted={() => (setCur(null), servers.reload())} />
         ) : (
-          <Empty icon={<Plug size={28} />} title="Aucun serveur sélectionné">
-            Part d&apos;un modèle à gauche ou crée un serveur. Les serveurs stdio sont lancés localement (npx, uvx, docker…).
+          <Empty icon={<Plug size={28} />} title={t("Aucun serveur sélectionné")}>
+            {t("Part d'un modèle à gauche ou crée un serveur. Les serveurs stdio sont lancés localement (npx, uvx, docker…).")}
           </Empty>
         )}
       </div>
@@ -97,6 +99,7 @@ export function McpView() {
 }
 
 function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer>; onSaved: (s: McpServer) => void; onDeleted: () => void }) {
+  const { t } = useT();
   const [s, setS] = useState(initial);
   const [args, setArgs] = useState((initial.args ?? []).join("\n"));
   const [env, setEnv] = useState(toLines(initial.env));
@@ -119,26 +122,26 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
     <Card className="flex min-w-0 flex-col gap-3 p-4">
       <ErrorNote>{error}</ErrorNote>
       <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-        <Field label="Nom" hint="Préfixe des outils côté agent (ex : github__create_issue).">
+        <Field label={t("Nom")} hint={t("Préfixe des outils côté agent (ex : github__create_issue).")}>
           <Input value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} />
         </Field>
         <Field label="Transport">
           <Select value={s.transport} onChange={(e) => setS({ ...s, transport: e.target.value as McpServer["transport"] })}>
-            <option value="stdio">stdio (local)</option>
-            <option value="http">HTTP streamable</option>
-            <option value="sse">SSE (ancien)</option>
+            <option value="stdio">{t("stdio (local)")}</option>
+            <option value="http">{t("HTTP streamable")}</option>
+            <option value="sse">{t("SSE (ancien)")}</option>
           </Select>
         </Field>
       </div>
       {s.transport === "stdio" ? (
         <>
-          <Field label="Commande">
+          <Field label={t("Commande")}>
             <Input className="font-mono" value={s.command} onChange={(e) => setS({ ...s, command: e.target.value })} placeholder="npx" />
           </Field>
-          <Field label="Arguments (un par ligne)">
+          <Field label={t("Arguments (un par ligne)")}>
             <Textarea rows={4} className="font-mono text-xs" value={args} onChange={(e) => setArgs(e.target.value)} />
           </Field>
-          <Field label="Variables d'environnement (CLE=valeur, une par ligne)">
+          <Field label={t("Variables d'environnement (CLE=valeur, une par ligne)")}>
             <Textarea rows={3} className="font-mono text-xs" value={env} onChange={(e) => setEnv(e.target.value)} />
           </Field>
         </>
@@ -147,14 +150,14 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
           <Field label="URL">
             <Input className="font-mono" value={s.url} onChange={(e) => setS({ ...s, url: e.target.value })} placeholder="https://…/mcp" />
           </Field>
-          <Field label="En-têtes (Nom: valeur, un par ligne)">
+          <Field label={t("En-têtes (Nom: valeur, un par ligne)")}>
             <Textarea rows={3} className="font-mono text-xs" value={headers} onChange={(e) => setHeaders(e.target.value)} />
           </Field>
         </>
       )}
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={!!s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} className="accent-[var(--accent)]" />
-        Activé
+        {t("Activé")}
       </label>
 
       <div className="flex flex-wrap gap-2">
@@ -162,7 +165,7 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
           <Button
             variant="danger"
             onClick={async () => {
-              if (!confirm(`Supprimer le serveur « ${s.name} » ?`)) return;
+              if (!confirm(t("Supprimer le serveur « {name} » ?", { name: s.name ?? "" }))) return;
               await crud.remove("mcp", s.id!);
               onDeleted();
             }}
@@ -185,12 +188,12 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
             setBusy(false);
           }}
         >
-          {busy ? "Connexion…" : "Tester"}
+          {busy ? t("Connexion…") : t("Tester")}
         </Button>
         <Button
           variant="primary"
           onClick={async () => {
-            if (!s.name?.trim()) return setError("Le nom est obligatoire");
+            if (!s.name?.trim()) return setError(t("Le nom est obligatoire"));
             try {
               onSaved(await crud.save<McpServer>("mcp", payload()));
               setError(undefined);
@@ -199,7 +202,7 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
             }
           }}
         >
-          Enregistrer
+          {t("Enregistrer")}
         </Button>
       </div>
 
@@ -207,13 +210,13 @@ function McpEditor({ initial, onSaved, onDeleted }: { initial: Partial<McpServer
         <div className={cx("rounded-lg border p-3 text-sm", test.ok ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5")}>
           <div className="mb-2 flex items-center gap-1.5 font-medium">
             {test.ok ? <CheckCircle2 size={15} className="text-emerald-400" /> : <XCircle size={15} className="text-red-400" />}
-            {test.ok ? `Connecté · ${test.tools?.length} outil(s)` : "Échec de connexion"}
+            {test.ok ? t("Connecté · {n} outil(s)", { n: test.tools?.length ?? 0 }) : t("Échec de connexion")}
           </div>
           {test.error && <pre className="whitespace-pre-wrap text-xs text-red-300">{test.error}</pre>}
           <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-            {test.tools?.map((t) => (
-              <div key={t.name} className="text-xs">
-                <span className="font-mono text-fg">{t.name}</span> <span className="text-fg-muted">— {t.description.slice(0, 140)}</span>
+            {test.tools?.map((tool) => (
+              <div key={tool.name} className="text-xs">
+                <span className="font-mono text-fg">{tool.name}</span> <span className="text-fg-muted">— {tool.description.slice(0, 140)}</span>
               </div>
             ))}
           </div>

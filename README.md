@@ -43,6 +43,10 @@ Think of it as **LiteLLM and an agent workspace fused together**, with a Kanban 
 | 🏃 **Planning & sprints** | One click: the project lead, with the tech lead, breaks the project into **estimated tasks** (story points, priority, assignee) grouped into **sprints**. |
 | 👤 **Agent profiles** | 34 ready-made profiles in 7 categories, each with the tools its role needs; your own profiles; AI-generated agents or whole teams. |
 | 📚 **RAG, skills, MCP** | Local embeddings over your docs (txt, md, pdf, code), reusable Markdown skills, and any **MCP** server (stdio or HTTP). |
+| 🏷️ **Knowledge graph** | Documents tagged by the **local model** (one theme + specific tags), shown as constellations; an animated search lab shows hybrid search and reranking step by step. |
+| 🧩 **Skill library** | 22 built-in skills (code review, debugging, user stories, ML evaluation, executive summary…), filterable by category and assignable to agents in one click. |
+| 🖥️ **Machine advisor** | Detects your hardware (RAM, Apple Silicon / NVIDIA GPU, disk), tells which Ollama models fit smoothly for each use, installs them and measures their real speed. |
+| 🌍 **French / English** | One switch for the whole interface; agents then answer in the chosen language. |
 | 🛠️ **Agent tools** | Web search (self-hosted SearXNG), page reading, sandboxed file read/write per project, optional shell commands, board management. |
 | ⏳ **Background runs** | Local answers take minutes: runs keep going when you switch screens or reload, with an “answer ready” notification. |
 | 📊 **Gateway & stats** | Ollama console (installed / loaded / pull), usage per agent and per project, and an **OpenAI-compatible proxy** for your other tools. |

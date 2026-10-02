@@ -25,6 +25,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useT } from "@/i18n";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
@@ -51,12 +52,12 @@ type Workspace = { root: string; entries: Entry[] };
 type Tab = "overview" | "tasks" | "files" | "team" | "stats";
 const POINTS = [0, 1, 2, 3, 5, 8, 13];
 
-const ago = (ms: number) => {
+const ago = (ms: number, t: (fr: string, vars?: Record<string, string | number>) => string, lang: string) => {
   const s = Math.round((Date.now() - ms) / 1000);
-  if (s < 60) return "à l'instant";
-  if (s < 3600) return `il y a ${Math.round(s / 60)} min`;
-  if (s < 86400) return `il y a ${Math.round(s / 3600)} h`;
-  return new Date(ms).toLocaleDateString("fr-FR");
+  if (s < 60) return t("à l'instant");
+  if (s < 3600) return t("il y a {n} min", { n: Math.round(s / 60) });
+  if (s < 86400) return t("il y a {n} h", { n: Math.round(s / 3600) });
+  return new Date(ms).toLocaleDateString(lang === "en" ? "en-GB" : "fr-FR");
 };
 
 function useCopy() {
@@ -103,6 +104,7 @@ export function ProjectsView({
   /** Open a scoping-then-planning discussion with the project's first contacts. */
   onPlanChat: (projectId: string) => void;
 }) {
+  const { t } = useT();
   const tasks = useData<Task[]>("/api/crud/tasks");
   const [creating, setCreating] = useState(false);
   const list = projects ?? [];
@@ -110,8 +112,8 @@ export function ProjectsView({
 
   // Agents update the board during runs: keep it fresh.
   useEffect(() => {
-    const t = setInterval(tasks.reload, 3000);
-    return () => clearInterval(t);
+    const timer = setInterval(tasks.reload, 3000);
+    return () => clearInterval(timer);
   }, [tasks.reload]);
 
   const showCreate = creating || !!createFrom;
@@ -121,8 +123,8 @@ export function ProjectsView({
       {/* project sub-menu */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-line">
         <div className="flex items-center justify-between px-4 pb-2 pt-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Projets</span>
-          <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title="Nouveau projet">
+          <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
+          <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
             <FolderPlus size={15} />
           </Button>
         </div>
@@ -139,7 +141,7 @@ export function ProjectsView({
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
                   <span>
-                    {mine.length} tâche{mine.length > 1 ? "s" : ""}
+                    {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
                   </span>
                   {mine.length > 0 && (
                     <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
@@ -152,7 +154,7 @@ export function ProjectsView({
           })}
           {!list.length && projects && (
             <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
-              Aucun projet. Crée le premier à partir d&apos;un modèle d&apos;équipe.
+              {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
             </button>
           )}
         </div>
@@ -163,7 +165,7 @@ export function ProjectsView({
           key={project.id}
           project={project}
           agents={agents}
-          tasks={(tasks.data ?? []).filter((t) => t.project_id === project.id)}
+          tasks={(tasks.data ?? []).filter((x) => x.project_id === project.id)}
           reloadTasks={tasks.reload}
           runs={runs}
           onChat={() => onChat(project.id)}
@@ -174,7 +176,7 @@ export function ProjectsView({
           onDeleted={() => (onSelect(null), reloadProjects())}
         />
       ) : (
-        <Empty title="Aucun projet">Un projet a son propre dossier, son tableau de tâches et une équipe copiée depuis un modèle.</Empty>
+        <Empty title={t("Aucun projet")}>{t("Un projet a son propre dossier, son tableau de tâches et une équipe copiée depuis un modèle.")}</Empty>
       )}
 
       {showCreate && (
@@ -196,6 +198,7 @@ export function ProjectsView({
 }
 
 function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; templateId: string | null; onClose: () => void; onCreated: (p: Project, scoping: boolean) => void }) {
+  const { t } = useT();
   const [scoping, setScoping] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -207,7 +210,7 @@ function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; 
     <Modal
       open
       onClose={onClose}
-      title="Nouveau projet"
+      title={t("Nouveau projet")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -226,37 +229,37 @@ function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; 
               }
             }}
           >
-            Créer le projet
+            {t("Créer le projet")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <ErrorNote>{error}</ErrorNote>
-        <Field label="Nom du projet">
-          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Appli de réservation de salles" />
+        <Field label={t("Nom du projet")}>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Appli de réservation de salles")} />
         </Field>
-        <Field label="Description">
-          <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Objectif, contexte, contraintes…" />
+        <Field label={t("Description")}>
+          <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("Objectif, contexte, contraintes…")} />
         </Field>
-        <Field label="Équipe (modèle)" hint="La composition est copiée dans le projet : tu pourras l'ajuster sans modifier le modèle.">
+        <Field label={t("Équipe (modèle)")} hint={t("La composition est copiée dans le projet : tu pourras l'ajuster sans modifier le modèle.")}>
           <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                👥 {t.name}
+            {teams.map((tm) => (
+              <option key={tm.id} value={tm.id}>
+                👥 {tm.name}
               </option>
             ))}
-            <option value="">Équipe vide (à construire)</option>
+            <option value="">{t("Équipe vide (à construire)")}</option>
           </Select>
         </Field>
-        <Field label="Dossier du projet (optionnel)" hint="Vide : un dossier dédié est créé dans workspace/ avec le nom du projet.">
+        <Field label={t("Dossier du projet (optionnel)")} hint={t("Vide : un dossier dédié est créé dans workspace/ avec le nom du projet.")}>
           <Input className="font-mono text-xs" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="/Users/moi/Projets/reservation-salles" />
         </Field>
         <label className="flex items-start gap-2 rounded-lg border border-line bg-surface-1 p-3 text-sm">
           <input type="checkbox" checked={scoping} onChange={(e) => setScoping(e.target.checked)} className="mt-0.5 accent-[var(--accent)]" />
           <span>
-            <span className="block font-medium">Démarrer par un échange de cadrage avec l&apos;équipe</span>
-            <span className="block text-xs text-fg-muted">Les premiers contacts te posent leurs questions, puis découpent le projet en tâches quand tu valides.</span>
+            <span className="block font-medium">{t("Démarrer par un échange de cadrage avec l'équipe")}</span>
+            <span className="block text-xs text-fg-muted">{t("Les premiers contacts te posent leurs questions, puis découpent le projet en tâches quand tu valides.")}</span>
           </span>
         </label>
       </div>
@@ -289,6 +292,7 @@ function ProjectDetail({
   onPlanChat: () => void;
   onDeleted: () => void;
 }) {
+  const { t } = useT();
   const [tab, setTab] = useState<Tab>("overview");
   const [openFile, setOpenFile] = useState<string | null>(null);
   const ws = useData<Workspace>(`/api/workspace?projectId=${project.id}`);
@@ -302,8 +306,8 @@ function ProjectDetail({
   // Files change while agents work: refresh the listing during runs.
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(ws.reload, 3000);
-    return () => clearInterval(t);
+    const timer = setInterval(ws.reload, 3000);
+    return () => clearInterval(timer);
   }, [busy, ws.reload]);
 
   const root = ws.data?.root ?? project.path;
@@ -318,14 +322,14 @@ function ProjectDetail({
               <h1 className="text-lg font-semibold">{project.name}</h1>
               {busy && (
                 <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
-                  <Loader2 size={11} className="animate-spin" /> l&apos;équipe travaille
+                  <Loader2 size={11} className="animate-spin" /> {t("l'équipe travaille")}
                 </span>
               )}
             </div>
             {project.description && <div className="mt-0.5 max-w-2xl text-sm text-fg-muted">{project.description}</div>}
             <div className="mt-1.5 flex items-center -space-x-1.5">
               {people.map((a) => (
-                <span key={a.id} title={`${a.name} — ${a.role}${spec.entry_ids.includes(a.id) ? " (premier contact)" : ""}`}>
+                <span key={a.id} title={`${a.name} — ${a.role}${spec.entry_ids.includes(a.id) ? ` (${t("premier contact")})` : ""}`}>
                   <Avatar emoji={a.emoji} color={a.color} size={24} />
                 </span>
               ))}
@@ -333,13 +337,13 @@ function ProjectDetail({
           </div>
           <div className="flex gap-2">
             <Button variant="primary" onClick={onChat}>
-              <MessageSquare size={14} /> Discuter avec l&apos;équipe
+              <MessageSquare size={14} /> {t("Discuter avec l'équipe")}
             </Button>
             <Button
               variant="ghost"
-              title="Supprimer le projet (les fichiers sur le disque sont conservés)"
+              title={t("Supprimer le projet (les fichiers sur le disque sont conservés)")}
               onClick={async () => {
-                if (!confirm(`Supprimer le projet « ${project.name} », ses conversations et ses tâches ?\nLes fichiers du dossier sont conservés.`)) return;
+                if (!confirm(t("Supprimer le projet « {name} », ses conversations et ses tâches ?\nLes fichiers du dossier sont conservés.", { name: project.name }))) return;
                 await api(`/api/projects?id=${project.id}`, { method: "DELETE" });
                 onDeleted();
               }}
@@ -356,16 +360,16 @@ function ProjectDetail({
               <code className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
                 {root}
               </code>
-              <Button size="sm" variant="ghost" onClick={() => copy(root)} title="Copier le chemin">
+              <Button size="sm" variant="ghost" onClick={() => copy(root)} title={t("Copier le chemin")}>
                 {copied === root ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "finder")} title="Ouvrir dans le Finder">
+              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "finder")} title={t("Ouvrir dans le Finder")}>
                 <Folder size={13} /> Finder
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "vscode")} title="Ouvrir dans VS Code">
+              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "vscode")} title={t("Ouvrir dans VS Code")}>
                 <Code2 size={13} /> VS Code
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditPath(project.path)} title="Changer le dossier du projet">
+              <Button size="sm" variant="ghost" onClick={() => setEditPath(project.path)} title={t("Changer le dossier du projet")}>
                 <Pencil size={13} />
               </Button>
             </>
@@ -382,10 +386,10 @@ function ProjectDetail({
             >
               <Input autoFocus className="h-8 font-mono text-xs" value={editPath} onChange={(e) => setEditPath(e.target.value)} />
               <Button size="sm" variant="primary" type="submit">
-                Enregistrer
+                {t("Enregistrer")}
               </Button>
               <Button size="sm" variant="ghost" type="button" onClick={() => setEditPath(null)}>
-                Annuler
+                {t("Annuler")}
               </Button>
             </form>
           )}
@@ -394,11 +398,11 @@ function ProjectDetail({
         <div className="mt-3 flex gap-1">
           {(
             [
-              ["overview", "Vue d'ensemble"],
-              ["tasks", `Tâches (${tasks.length})`],
-              ["files", `Fichiers (${ws.data?.entries.filter((e) => !e.dir).length ?? 0})`],
-              ["team", `Équipe (${people.length})`],
-              ["stats", "Stats"],
+              ["overview", t("Vue d'ensemble")],
+              ["tasks", t("Tâches ({n})", { n: tasks.length })],
+              ["files", t("Fichiers ({n})", { n: ws.data?.entries.filter((e) => !e.dir).length ?? 0 })],
+              ["team", t("Équipe ({n})", { n: people.length })],
+              ["stats", t("Stats")],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -427,14 +431,15 @@ function ProjectDetail({
 
 /** Team tab: the project's own team composition, and the resources each member may use. */
 function TeamTab(props: { project: Project; agents: Agent[]; onSaved: () => void; onAgentsChange: () => void }) {
+  const { t } = useT();
   const [sub, setSub] = useState<"composition" | "resources">("composition");
   return (
     <div className="flex h-full flex-col">
       <div className="flex gap-1 px-6 pt-4">
         {(
           [
-            ["composition", "Composition"],
-            ["resources", "Ressources (connaissances & MCP)"],
+            ["composition", t("Composition")],
+            ["resources", t("Ressources (connaissances & MCP)")],
           ] as const
         ).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)} className={cx("rounded-lg px-3 py-1 text-sm", sub === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
@@ -448,6 +453,7 @@ function TeamTab(props: { project: Project; agents: Agent[]; onSaved: () => void
 }
 
 function ProjectTeam({ project, agents, onSaved, onAgentsChange }: { project: Project; agents: Agent[]; onSaved: () => void; onAgentsChange: () => void }) {
+  const { t } = useT();
   const [spec, setSpec] = useState<TeamSpec>(() => specFromTeam(project.team));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string>();
@@ -455,27 +461,27 @@ function ProjectTeam({ project, agents, onSaved, onAgentsChange }: { project: Pr
   return (
     <div className="flex h-full min-h-[520px] flex-col gap-3 p-6">
       <div className="flex flex-wrap items-center gap-4">
-        <p className="flex-1 text-sm text-fg-muted">Composition propre à ce projet (copiée depuis le modèle à la création). Les changements ici ne modifient pas le modèle.</p>
+        <p className="flex-1 text-sm text-fg-muted">{t("Composition propre à ce projet (copiée depuis le modèle à la création). Les changements ici ne modifient pas le modèle.")}</p>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={spec.clarify} onChange={(e) => update({ ...spec, clarify: e.target.checked })} className="accent-[var(--accent)]" />
-          Cadrage avant délégation
+          {t("Cadrage avant délégation")}
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={spec.concert} onChange={(e) => update({ ...spec, concert: e.target.checked })} className="accent-[var(--accent)]" />
-          Concertation des premiers contacts
+          {t("Concertation des premiers contacts")}
         </label>
         <Button
           variant="primary"
           disabled={!dirty}
           onClick={async () => {
-            if (!spec.entry_ids.length) return setError("Définis au moins un premier contact (★)");
+            if (!spec.entry_ids.length) return setError(t("Définis au moins un premier contact (★)"));
             await crud.save("projects", { id: project.id, team: { ...spec, layout: layoutOf(spec) } });
             setDirty(false);
             setError(undefined);
             onSaved();
           }}
         >
-          {dirty ? "Enregistrer l'équipe" : "Enregistré ✓"}
+          {dirty ? t("Enregistrer l'équipe") : t("Enregistré ✓")}
         </Button>
       </div>
       <ErrorNote>{error}</ErrorNote>
@@ -501,9 +507,10 @@ function Overview({
   onTab: (t: Tab) => void;
   onFile: (p: string) => void;
 }) {
+  const { t, lang } = useT();
   const hasLog = ws?.entries.some((e) => e.path === "docs/DECISIONS.md");
   const log = useData<{ content: string }>(hasLog ? `/api/workspace?projectId=${projectId}&file=${encodeURIComponent("docs/DECISIONS.md")}` : null);
-  const done = tasks.filter((t) => t.status === "done").length;
+  const done = tasks.filter((x) => x.status === "done").length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const recentTasks = [...tasks].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0)).slice(0, 6);
   const recentFiles = (ws?.entries ?? [])
@@ -514,13 +521,13 @@ function Overview({
     <div className="grid gap-4 p-6 lg:grid-cols-2">
       <Card className="p-4 lg:col-span-2">
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold">Avancement</div>
-          <div className="text-sm tabular-nums text-fg-muted">{pct} % terminé</div>
+          <div className="text-sm font-semibold">{t("Avancement")}</div>
+          <div className="text-sm tabular-nums text-fg-muted">{t("{n} % terminé", { n: pct })}</div>
         </div>
         <div className="mb-4 flex h-2 overflow-hidden rounded-full bg-surface-3">
           {COLUMNS.map((c) => {
-            const n = tasks.filter((t) => t.status === c.id).length;
-            return n ? <div key={c.id} style={{ width: `${(n / tasks.length) * 100}%`, background: c.color }} title={`${c.label} : ${n}`} /> : null;
+            const n = tasks.filter((x) => x.status === c.id).length;
+            return n ? <div key={c.id} style={{ width: `${(n / tasks.length) * 100}%`, background: c.color }} title={`${t(c.label)} : ${n}`} /> : null;
           })}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -528,54 +535,54 @@ function Overview({
             <button key={c.id} onClick={() => onTab("tasks")} className="rounded-lg border border-line bg-surface-2 p-3 text-left hover:border-line-strong">
               <div className="flex items-center gap-1.5 text-xs text-fg-muted">
                 <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                {c.label}
+                {t(c.label)}
               </div>
-              <div className="mt-1 text-xl font-semibold tabular-nums">{tasks.filter((t) => t.status === c.id).length}</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums">{tasks.filter((x) => x.status === c.id).length}</div>
             </button>
           ))}
         </div>
       </Card>
       <Card>
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">Tâches récentes</span>
+          <span className="text-sm font-semibold">{t("Tâches récentes")}</span>
           <button onClick={() => onTab("tasks")} className="text-xs text-accent hover:underline">
-            Tableau
+            {t("Tableau")}
           </button>
         </div>
-        {recentTasks.map((t) => {
-          const col = COLUMNS.find((c) => c.id === t.status)!;
-          const who = byId.get(t.assignee_id);
+        {recentTasks.map((task) => {
+          const col = COLUMNS.find((c) => c.id === task.status)!;
+          const who = byId.get(task.assignee_id);
           return (
-            <div key={t.id} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-0">
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: col.color }} title={col.label} />
-              <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
-              {t.evaluation && <EvalBadge e={t.evaluation} />}
-              <Badge color={col.color}>{col.label}</Badge>
+            <div key={task.id} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-0">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: col.color }} title={t(col.label)} />
+              <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
+              {task.evaluation && <EvalBadge e={task.evaluation} />}
+              <Badge color={col.color}>{t(col.label)}</Badge>
               {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
             </div>
           );
         })}
-        {!tasks.length && <div className="px-4 py-4 text-sm text-fg-subtle">Aucune tâche. Discute avec l&apos;équipe pour planifier le projet, ou crée-les dans le tableau.</div>}
+        {!tasks.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucune tâche. Discute avec l'équipe pour planifier le projet, ou crée-les dans le tableau.")}</div>}
       </Card>
       <Card>
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">Fichiers récents</span>
+          <span className="text-sm font-semibold">{t("Fichiers récents")}</span>
           <button onClick={() => onTab("files")} className="text-xs text-accent hover:underline">
-            Tous les fichiers
+            {t("Tous les fichiers")}
           </button>
         </div>
         {recentFiles.map((f) => (
           <button key={f.path} onClick={() => onFile(f.path)} className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-surface-2">
             <File size={13} className="shrink-0 text-fg-muted" />
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{f.path}</span>
-            <span className="shrink-0 text-[11px] text-fg-subtle">{ago(f.mtime)}</span>
+            <span className="shrink-0 text-[11px] text-fg-subtle">{ago(f.mtime, t, lang)}</span>
           </button>
         ))}
-        {!recentFiles.length && <div className="px-4 py-4 text-sm text-fg-subtle">Aucun fichier pour l&apos;instant.</div>}
+        {!recentFiles.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucun fichier pour l'instant.")}</div>}
       </Card>
       <Card className="lg:col-span-2">
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">Journal des décisions</span>
+          <span className="text-sm font-semibold">{t("Journal des décisions")}</span>
           {hasLog && (
             <button onClick={() => onFile("docs/DECISIONS.md")} className="font-mono text-xs text-accent hover:underline">
               docs/DECISIONS.md
@@ -587,7 +594,9 @@ function Overview({
             <Markdown>{log.data.content.replace(/^# Journal des décisions\n+/, "")}</Markdown>
           ) : (
             <div className="text-sm text-fg-subtle">
-              Vide pour l&apos;instant. Il se remplit quand tu valides un cadrage, quand une tâche est contrôlée, et quand les premiers contacts consignent une décision. Chaque agent du projet le reçoit.
+              {t(
+                "Vide pour l'instant. Il se remplit quand tu valides un cadrage, quand une tâche est contrôlée, et quand les premiers contacts consignent une décision. Chaque agent du projet le reçoit.",
+              )}
             </div>
           )}
         </div>
@@ -625,6 +634,7 @@ function Board({
   onRunsChanged: () => void;
   onPlanChat: () => void;
 }) {
+  const { t: tr } = useT();
   const [edit, setEdit] = useState<Partial<Task> | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
   const [local, setLocal] = useState<Record<string, Task["status"]>>({});
@@ -697,38 +707,38 @@ function Board({
             setEdit({ project_id: project.id, title: "", description: "", status: "todo", priority: "normal", assignee_id: "", notes: [], complexity: 0, sprint_id: currentSprint?.id ?? "", depends_on: [] })
           }
         >
-          <Plus size={14} /> Tâche
+          <Plus size={14} /> {tr("Tâche")}
         </Button>
         {planRun ? (
           <button onClick={() => planTrace && setFocus(planTrace.order.find((id) => !planTrace.calls[id].parentCallId) ?? null)} className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs text-accent">
-            <Loader2 size={12} className="animate-spin" /> Planification en cours… suivre
+            <Loader2 size={12} className="animate-spin" /> {tr("Planification en cours… suivre")}
           </button>
         ) : (
-          <Button size="sm" variant="soft" onClick={() => setPlanOpen(true)} title="Le premier contact découpe le projet en tâches (avec les autres premiers contacts)">
-            <ListTree size={13} /> Planifier
+          <Button size="sm" variant="soft" onClick={() => setPlanOpen(true)} title={tr("Le premier contact découpe le projet en tâches (avec les autres premiers contacts)")}>
+            <ListTree size={13} /> {tr("Planifier")}
           </Button>
         )}
         {chain ? (
           <>
             <span className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs text-accent">
-              <Loader2 size={12} className="animate-spin" /> Chaîne en cours
+              <Loader2 size={12} className="animate-spin" /> {tr("Chaîne en cours")}
             </span>
             <Button size="sm" variant="danger" onClick={async () => (await api("/api/runs/stop", { method: "POST", json: { id: chain.id } }), onRunsChanged())}>
-              <Square size={12} /> Arrêter
+              <Square size={12} /> {tr("Arrêter")}
             </Button>
           </>
         ) : (
           <>
-            <Button size="sm" variant="soft" onClick={launchChain} title="Exécute les tâches ouvertes (du sprint affiché) dans l'ordre des dépendances">
-              <Link2 size={13} /> {currentSprint ? `Lancer le ${currentSprint.name}` : "Lancer la chaîne"}
+            <Button size="sm" variant="soft" onClick={launchChain} title={tr("Exécute les tâches ouvertes (du sprint affiché) dans l'ordre des dépendances")}>
+              <Link2 size={13} /> {currentSprint ? tr("Lancer le {name}", { name: currentSprint.name }) : tr("Lancer la chaîne")}
             </Button>
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Si le contrôle renvoie « à corriger », la tâche est relancée une fois avec le retour avant d'arrêter la chaîne">
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted" title={tr("Si le contrôle renvoie « à corriger », la tâche est relancée une fois avec le retour avant d'arrêter la chaîne")}>
               <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} className="accent-[var(--accent)]" />
-              relancer une fois si « à corriger »
+              {tr("relancer une fois si « à corriger »")}
             </label>
           </>
         )}
-        <span className="text-xs text-fg-subtle">▶ lance une tâche · 🔒 bloquée tant que ses dépendances ne sont pas terminées</span>
+        <span className="text-xs text-fg-subtle">{tr("▶ lance une tâche · 🔒 bloquée tant que ses dépendances ne sont pas terminées")}</span>
       </div>
       {error && (
         <div className="px-6 pt-2">
@@ -760,7 +770,7 @@ function Board({
             <div key={col.id} onDragOver={(e) => e.preventDefault()} onDrop={() => drag && move(drag, col.id)} className="flex min-h-40 flex-col rounded-xl border border-line bg-surface-1/50">
               <div className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium">
                 <span className="h-2 w-2 rounded-full" style={{ background: col.color }} />
-                {col.label}
+                {tr(col.label)}
                 <span className="text-xs text-fg-subtle">{items.length}</span>
               </div>
               <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
@@ -768,7 +778,7 @@ function Board({
                   const who = byId.get(t.assignee_id);
                   const isRunning = running.has(t.id);
                   const blockedBy = blockers(t);
-                  const phaseLabel = isRunning ? (t.status === "review" ? "contrôle en cours…" : `${who?.name ?? "l'agent"} travaille…`) : null;
+                  const phaseLabel = isRunning ? (t.status === "review" ? tr("contrôle en cours…") : tr("{name} travaille…", { name: who?.name ?? tr("l'agent") })) : null;
                   return (
                     <div
                       key={t.id}
@@ -781,14 +791,18 @@ function Board({
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1 text-sm font-medium leading-snug">{t.title}</div>
                         {!isRunning && t.status !== "done" && blockedBy.length > 0 && (
-                          <span title={`Bloquée par : ${blockedBy.map((b) => b.title).join(", ")}`} className="flex h-6 w-6 shrink-0 items-center justify-center text-fg-subtle">
+                          <span title={tr("Bloquée par : {list}", { list: blockedBy.map((b) => b.title).join(", ") })} className="flex h-6 w-6 shrink-0 items-center justify-center text-fg-subtle">
                             <Lock size={12} />
                           </span>
                         )}
                         {!isRunning && t.status !== "done" && !blockedBy.length && (
                           <button
                             onClick={(e) => (e.stopPropagation(), launch(t))}
-                            title={who ? `${t.status === "retry" ? "Relancer" : "Lancer"} : ${who.name} réalise la tâche` : "Assigne d'abord la tâche à un agent"}
+                            title={
+                              who
+                                ? tr(t.status === "retry" ? "Relancer : {name} réalise la tâche" : "Lancer : {name} réalise la tâche", { name: who.name })
+                                : tr("Assigne d'abord la tâche à un agent")
+                            }
                             className={cx(
                               "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
                               who ? "bg-accent/15 text-accent hover:bg-accent/30" : "cursor-not-allowed text-fg-subtle",
@@ -818,8 +832,8 @@ function Board({
                       <div className="mt-2 flex items-center gap-1.5">
                         {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
                         {t.evaluation && <EvalBadge e={t.evaluation} />}
-                        {t.complexity > 0 && <Badge>{t.complexity} pts</Badge>}
-                        {t.priority !== "normal" && <Badge color={PRIORITY[t.priority].color}>{PRIORITY[t.priority].label}</Badge>}
+                        {t.complexity > 0 && <Badge>{tr("{n} pts", { n: t.complexity })}</Badge>}
+                        {t.priority !== "normal" && <Badge color={PRIORITY[t.priority].color}>{tr(PRIORITY[t.priority].label)}</Badge>}
                         {t.notes?.length > 0 && <Badge>{t.notes.length} 💬</Badge>}
                         <span className="ml-auto text-[10px] text-fg-subtle">#{t.id.slice(0, 5)}</span>
                       </div>
@@ -886,6 +900,7 @@ function TaskEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t: tr, lang } = useT();
   const [t, setT] = useState(initial);
   const [focus, setFocus] = useState<string | null>(null);
   const set = <K extends keyof Task>(k: K, v: Task[K]) => setT((x) => ({ ...x, [k]: v }));
@@ -915,7 +930,7 @@ function TaskEditor({
       <Modal
         open
         onClose={onClose}
-        title={t.id ? `Tâche #${t.id.slice(0, 5)}` : "Nouvelle tâche"}
+        title={t.id ? tr("Tâche #{id}", { id: t.id.slice(0, 5) }) : tr("Nouvelle tâche")}
         footer={
           <>
             {t.id && (
@@ -940,11 +955,11 @@ function TaskEditor({
                   onLaunch(cur);
                 }}
               >
-                {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? <RotateCcw size={13} /> : <Play size={13} />} {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? "Relancer" : "Lancer"}
+                {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? <RotateCcw size={13} /> : <Play size={13} />} {cur.status === "retry" || cur.evaluation?.verdict === "a_corriger" ? tr("Relancer") : tr("Lancer")}
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>
-              Fermer
+              {tr("Fermer")}
             </Button>
             <Button
               variant="primary"
@@ -954,44 +969,44 @@ function TaskEditor({
                 onClose();
               }}
             >
-              Enregistrer
+              {tr("Enregistrer")}
             </Button>
           </>
         }
       >
         <div className="flex max-h-[65vh] flex-col gap-3 overflow-y-auto pr-1">
-          <Field label="Titre">
+          <Field label={tr("Titre")}>
             <Input value={t.title} onChange={(e) => set("title", e.target.value)} />
           </Field>
-          <Field label="Description / consigne">
+          <Field label={tr("Description / consigne")}>
             <Textarea rows={4} value={t.description} onChange={(e) => set("description", e.target.value)} />
           </Field>
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Statut">
+            <Field label={tr("Statut")}>
               {t.id ? (
                 <div className="flex h-9 items-center gap-1.5 text-sm">
                   <span className="h-2 w-2 rounded-full" style={{ background: COLUMNS.find((c) => c.id === cur.status)?.color }} />
-                  {COLUMNS.find((c) => c.id === cur.status)?.label}
+                  {tr(COLUMNS.find((c) => c.id === cur.status)?.label ?? "")}
                   {running && <Loader2 size={12} className="animate-spin text-accent" />}
                 </div>
               ) : (
                 <Select value={t.status} onChange={(e) => set("status", e.target.value as Task["status"])}>
                   {COLUMNS.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label}
+                      {tr(c.label)}
                     </option>
                   ))}
                 </Select>
               )}
             </Field>
-            <Field label="Priorité">
+            <Field label={tr("Priorité")}>
               <Select value={t.priority} onChange={(e) => set("priority", e.target.value as Task["priority"])}>
-                <option value="high">Haute</option>
-                <option value="normal">Normale</option>
-                <option value="low">Basse</option>
+                <option value="high">{tr("Haute")}</option>
+                <option value="normal">{tr("Normale")}</option>
+                <option value="low">{tr("Basse")}</option>
               </Select>
             </Field>
-            <Field label="Assignée à">
+            <Field label={tr("Assignée à")}>
               <Select value={t.assignee_id} onChange={(e) => set("assignee_id", e.target.value)}>
                 <option value="">—</option>
                 {agents.map((a) => (
@@ -1004,46 +1019,46 @@ function TaskEditor({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Complexité (points)">
+            <Field label={tr("Complexité (points)")}>
               <Select value={t.complexity ?? 0} onChange={(e) => set("complexity", Number(e.target.value))}>
                 {POINTS.map((p) => (
                   <option key={p} value={p}>
-                    {p ? `${p} pt${p > 1 ? "s" : ""}` : "Non estimée"}
+                    {p ? (p > 1 ? tr("{n} pts", { n: p }) : tr("{n} pt", { n: p })) : tr("Non estimée")}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Sprint">
+            <Field label={tr("Sprint")}>
               <Select value={t.sprint_id ?? ""} onChange={(e) => set("sprint_id", e.target.value)}>
-                <option value="">Backlog</option>
+                <option value="">{tr("Backlog")}</option>
                 {sprints
                   .filter((sp) => sp.status !== "done" || sp.id === t.sprint_id)
                   .map((sp) => (
                     <option key={sp.id} value={sp.id}>
                       {sp.name}
-                      {sp.status === "active" ? " (actif)" : sp.status === "done" ? " (clôturé)" : ""}
+                      {sp.status === "active" ? ` (${tr("actif")})` : sp.status === "done" ? ` (${tr("clôturé")})` : ""}
                     </option>
                   ))}
               </Select>
             </Field>
           </div>
-          <Field label="Dépend de" hint="La tâche reste bloquée tant que celles-ci ne sont pas terminées ; leur compte rendu est transmis à l'agent au lancement.">
+          <Field label={tr("Dépend de")} hint={tr("La tâche reste bloquée tant que celles-ci ne sont pas terminées ; leur compte rendu est transmis à l'agent au lancement.")}>
             <DependencyPick task={t} tasks={projectTasks} value={t.depends_on ?? []} onChange={(v) => set("depends_on", v)} />
           </Field>
 
           {cur.evaluation && (
             <div className={cx("rounded-lg border p-3", cur.evaluation.verdict === "valide" ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5")}>
               <div className="mb-1 flex items-center gap-2 text-sm font-medium">
-                {cur.evaluation.verdict === "valide" ? "✅ Validée" : "↩️ À corriger"}
+                {cur.evaluation.verdict === "valide" ? tr("✅ Validée") : tr("↩️ À corriger")}
                 <span className="text-amber-400">{"★".repeat(cur.evaluation.score)}{"☆".repeat(5 - cur.evaluation.score)}</span>
-                <span className="ml-auto text-xs font-normal text-fg-subtle">par {cur.evaluation.by}</span>
+                <span className="ml-auto text-xs font-normal text-fg-subtle">{tr("par {name}", { name: cur.evaluation.by })}</span>
               </div>
               <div className="whitespace-pre-wrap text-xs text-fg-muted">{cur.evaluation.comment}</div>
             </div>
           )}
 
           {(roots.length > 0 || running) && (
-            <Field label="Déroulé">
+            <Field label={tr("Déroulé")}>
               <div className="flex flex-wrap gap-2">
                 {roots.map((c) => {
                   const a = byId.get(c.agentId);
@@ -1051,29 +1066,29 @@ function TaskEditor({
                   return (
                     <button key={c.callId} onClick={() => setFocus(c.callId)} className="flex items-center gap-2 rounded-lg border border-line bg-surface-1 px-2.5 py-1.5 text-xs hover:bg-surface-2">
                       <Eye size={12} />
-                      {a?.emoji} {a?.name} · {c === roots[0] ? "réalisation" : "contrôle"}
+                      {a?.emoji} {a?.name} · {c === roots[0] ? tr("réalisation") : tr("contrôle")}
                       {cl && <Loader2 size={11} className="animate-spin text-accent" />}
                     </button>
                   );
                 })}
-                {running && !roots.length && <span className="text-xs text-fg-subtle">démarrage…</span>}
+                {running && !roots.length && <span className="text-xs text-fg-subtle">{tr("démarrage…")}</span>}
               </div>
             </Field>
           )}
 
           {cur.result && (
             <details className="rounded-lg border border-line bg-surface-1 p-3">
-              <summary className="cursor-pointer text-sm font-medium">Résultat de l&apos;agent</summary>
+              <summary className="cursor-pointer text-sm font-medium">{tr("Résultat de l'agent")}</summary>
               <Markdown className="mt-2">{cur.result}</Markdown>
             </details>
           )}
 
           {!!cur.notes?.length && (
-            <Field label="Suivi">
+            <Field label={tr("Suivi")}>
               <div className="flex flex-col gap-1.5">
                 {[...cur.notes].reverse().map((n, i) => (
                   <div key={i} className="rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs">
-                    <span className="font-medium">{n.by}</span> <span className="text-fg-subtle">· {new Date(n.at).toLocaleString("fr-FR")}</span>
+                    <span className="font-medium">{n.by}</span> <span className="text-fg-subtle">· {new Date(n.at).toLocaleString(lang === "en" ? "en-GB" : "fr-FR")}</span>
                     <div className="mt-0.5 line-clamp-6 whitespace-pre-wrap text-fg-muted">{n.text}</div>
                   </div>
                 ))}
@@ -1105,11 +1120,12 @@ function SprintBar({
   onEdit: (s: Sprint) => void;
   onAction: (id: string, action: "start" | "close") => void;
 }) {
-  const pts = (ts: Task[]) => ts.reduce((n, t) => n + (t.complexity || 0), 0);
-  const backlog = tasks.filter((t) => !t.sprint_id || !sprints.some((x) => x.id === t.sprint_id));
+  const { t } = useT();
+  const pts = (ts: Task[]) => ts.reduce((n, x) => n + (x.complexity || 0), 0);
+  const backlog = tasks.filter((x) => !x.sprint_id || !sprints.some((y) => y.id === x.sprint_id));
   const current = sprints.find((x) => x.id === filter);
-  const mine = current ? tasks.filter((t) => t.sprint_id === current.id) : [];
-  const done = pts(mine.filter((t) => t.status === "done"));
+  const mine = current ? tasks.filter((x) => x.sprint_id === current.id) : [];
+  const done = pts(mine.filter((x) => x.status === "done"));
   const total = pts(mine);
   const chip = (id: string, label: React.ReactNode) => (
     <button key={id} onClick={() => onFilter(id)} className={cx("flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs", filter === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
@@ -1119,20 +1135,20 @@ function SprintBar({
   return (
     <div className="px-6 pt-3">
       <div className="flex flex-wrap items-center gap-1">
-        {chip("all", `Tout (${tasks.length})`)}
-        {chip("backlog", `Backlog (${backlog.length})`)}
+        {chip("all", t("Tout ({n})", { n: tasks.length }))}
+        {chip("backlog", t("Backlog ({n})", { n: backlog.length }))}
         {sprints.map((sp) =>
           chip(
             sp.id,
             <>
               {sp.status === "active" && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
               <span className={cx(sp.status === "done" && "line-through opacity-60")}>{sp.name}</span>
-              <span className="text-fg-subtle">({tasks.filter((t) => t.sprint_id === sp.id).length})</span>
+              <span className="text-fg-subtle">({tasks.filter((x) => x.sprint_id === sp.id).length})</span>
             </>,
           ),
         )}
         <button onClick={onNew} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg">
-          <Plus size={12} /> Sprint
+          <Plus size={12} /> {t("Sprint")}
         </button>
       </div>
       {current && (
@@ -1142,7 +1158,7 @@ function SprintBar({
             <div className="flex items-center gap-2 text-sm font-medium">
               {current.name}
               <Badge color={current.status === "active" ? "#10b981" : current.status === "done" ? "#64748b" : "#8b5cf6"}>
-                {current.status === "active" ? "actif" : current.status === "done" ? "clôturé" : "planifié"}
+                {current.status === "active" ? t("actif") : current.status === "done" ? t("clôturé") : t("planifié")}
               </Badge>
               {(current.start_date || current.end_date) && (
                 <span className="text-xs font-normal text-fg-subtle">
@@ -1154,9 +1170,9 @@ function SprintBar({
           </div>
           <div className="w-40">
             <div className="mb-1 flex justify-between text-[11px] text-fg-muted">
-              <span>avancement</span>
+              <span>{t("avancement")}</span>
               <span className="tabular-nums">
-                {done}/{total} pts
+                {t("{done}/{total} pts", { done, total })}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
@@ -1165,19 +1181,19 @@ function SprintBar({
           </div>
           {current.status === "planned" && (
             <Button size="sm" variant="primary" onClick={() => onAction(current.id, "start")}>
-              Démarrer
+              {t("Démarrer")}
             </Button>
           )}
           {current.status === "active" && (
             <Button
               size="sm"
               variant="soft"
-              onClick={() => confirm("Clôturer le sprint ? Les tâches non terminées passent au sprint suivant (ou au backlog).") && onAction(current.id, "close")}
+              onClick={() => confirm(t("Clôturer le sprint ? Les tâches non terminées passent au sprint suivant (ou au backlog).")) && onAction(current.id, "close")}
             >
-              Clôturer
+              {t("Clôturer")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => onEdit(current)} title="Modifier le sprint">
+          <Button size="sm" variant="ghost" onClick={() => onEdit(current)} title={t("Modifier le sprint")}>
             <Pencil size={13} />
           </Button>
         </div>
@@ -1187,19 +1203,20 @@ function SprintBar({
 }
 
 function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>; onClose: () => void; onSaved: () => void }) {
+  const { t } = useT();
   const [sp, setSp] = useState(initial);
   return (
     <Modal
       open
       onClose={onClose}
-      title={sp.id ? `Sprint : ${sp.name}` : "Nouveau sprint"}
+      title={sp.id ? t("Sprint : {name}", { name: sp.name ?? "" }) : t("Nouveau sprint")}
       footer={
         <>
           {sp.id && (
             <Button
               variant="danger"
               onClick={async () => {
-                if (!confirm(`Supprimer « ${sp.name} » ? Ses tâches repassent au backlog.`)) return;
+                if (!confirm(t("Supprimer « {name} » ? Ses tâches repassent au backlog.", { name: sp.name ?? "" }))) return;
                 await crud.remove("sprints", sp.id!);
                 onSaved();
                 onClose();
@@ -1210,7 +1227,7 @@ function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>;
           )}
           <div className="flex-1" />
           <Button variant="ghost" onClick={onClose}>
-            Annuler
+            {t("Annuler")}
           </Button>
           <Button
             variant="primary"
@@ -1221,23 +1238,23 @@ function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>;
               onClose();
             }}
           >
-            Enregistrer
+            {t("Enregistrer")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Nom">
+        <Field label={t("Nom")}>
           <Input value={sp.name} onChange={(e) => setSp({ ...sp, name: e.target.value })} />
         </Field>
-        <Field label="Objectif du sprint">
+        <Field label={t("Objectif du sprint")}>
           <Textarea rows={2} value={sp.goal} onChange={(e) => setSp({ ...sp, goal: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Début">
+          <Field label={t("Début")}>
             <Input type="date" value={sp.start_date} onChange={(e) => setSp({ ...sp, start_date: e.target.value })} />
           </Field>
-          <Field label="Fin">
+          <Field label={t("Fin")}>
             <Input type="date" value={sp.end_date} onChange={(e) => setSp({ ...sp, end_date: e.target.value })} />
           </Field>
         </div>
@@ -1247,6 +1264,7 @@ function SprintEditor({ initial, onClose, onSaved }: { initial: Partial<Sprint>;
 }
 
 function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; onChat: () => void; onClose: () => void; onStarted: () => void }) {
+  const { t } = useT();
   const [direct, setDirect] = useState(false);
   const [brief, setBrief] = useState("");
   const [sprints, setSprints] = useState(true);
@@ -1257,11 +1275,11 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
     <Modal
       open
       onClose={onClose}
-      title="Planifier le projet"
+      title={t("Planifier le projet")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Annuler
+            {t("Annuler")}
           </Button>
           {direct && (
             <Button
@@ -1275,7 +1293,7 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
                 }
               }}
             >
-              <ListTree size={14} /> Planifier directement
+              <ListTree size={14} /> {t("Planifier directement")}
             </Button>
           )}
         </>
@@ -1286,36 +1304,44 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
         <button onClick={onChat} className="flex items-start gap-3 rounded-xl border border-accent/40 bg-accent/5 p-3 text-left hover:border-accent">
           <span className="text-xl">💬</span>
           <span>
-            <span className="block text-sm font-medium">Discuter d&apos;abord avec l&apos;équipe (recommandé)</span>
+            <span className="block text-sm font-medium">{t("Discuter d'abord avec l'équipe (recommandé)")}</span>
             <span className="block text-xs text-fg-muted">
-              Présente le projet en quelques phrases : les premiers contacts te posent leurs questions, puis créent les tâches quand tu valides.
+              {t("Présente le projet en quelques phrases : les premiers contacts te posent leurs questions, puis créent les tâches quand tu valides.")}
             </span>
           </span>
         </button>
         <button onClick={() => setDirect(!direct)} className="text-left text-xs text-fg-muted hover:text-fg">
-          {direct ? "▾" : "▸"} Ou planifier directement à partir d&apos;une consigne
+          {direct ? "▾" : "▸"} {t("Ou planifier directement à partir d'une consigne")}
         </button>
         {direct && (
         <>
         <p className="text-sm text-fg-muted">
-          Le premier contact reprend le contexte (description, journal des décisions, fichiers, tâches existantes)
-          {entries > 1 ? ", se concerte avec les autres premiers contacts" : ""} puis découpe le travail en tâches avec responsable, complexité, priorité et dépendances.
+          {entries > 1
+            ? t(
+                "Le premier contact reprend le contexte (description, journal des décisions, fichiers, tâches existantes), se concerte avec les autres premiers contacts puis découpe le travail en tâches avec responsable, complexité, priorité et dépendances.",
+              )
+            : t(
+                "Le premier contact reprend le contexte (description, journal des décisions, fichiers, tâches existantes) puis découpe le travail en tâches avec responsable, complexité, priorité et dépendances.",
+              )}
         </p>
-        <Field label="Consigne (optionnelle)">
-          <Textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="ex : priorité au MVP, pas d'interface graphique pour l'instant" />
+        <Field label={t("Consigne (optionnelle)")}>
+          <Textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("ex : priorité au MVP, pas d'interface graphique pour l'instant")} />
         </Field>
-        <Field label="Granularité des tâches" hint="Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Le nombre de tâches suit le périmètre.">
+        <Field
+          label={t("Granularité des tâches")}
+          hint={t("Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Le nombre de tâches suit le périmètre.")}
+        >
           <Select value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
-            <option value="macro">Large : un lot de 1 à 3 jours par tâche</option>
-            <option value="standard">Standard : ½ à 1 journée par tâche</option>
-            <option value="fine">Fine : tâches de 1 à 3 heures</option>
+            <option value="macro">{t("Large : un lot de 1 à 3 jours par tâche")}</option>
+            <option value="standard">{t("Standard : ½ à 1 journée par tâche")}</option>
+            <option value="fine">{t("Fine : tâches de 1 à 3 heures")}</option>
           </Select>
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={sprints} onChange={(e) => setSprints(e.target.checked)} className="accent-[var(--accent)]" />
-          Organiser les tâches en sprints
+          {t("Organiser les tâches en sprints")}
         </label>
-        <p className="text-xs text-fg-subtle">Compte quelques minutes en local. Les tâches apparaissent dans le tableau à la fin ; tu peux suivre la réflexion en direct.</p>
+        <p className="text-xs text-fg-subtle">{t("Compte quelques minutes en local. Les tâches apparaissent dans le tableau à la fin ; tu peux suivre la réflexion en direct.")}</p>
         </>
         )}
       </div>
@@ -1346,21 +1372,34 @@ const fmtMs = (ms: number) => (ms >= 3600000 ? `${(ms / 3600000).toFixed(1)} h` 
 const fmtN = (n: number) => Math.round(n || 0).toLocaleString("fr-FR");
 
 function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean }) {
+  const { t } = useT();
   const st = useData<Stats>(`/api/projects/stats?id=${projectId}`);
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(st.reload, 5000);
-    return () => clearInterval(t);
+    const timer = setInterval(st.reload, 5000);
+    return () => clearInterval(timer);
   }, [busy, st.reload]);
   const s = st.data;
-  if (!s) return <div className="p-6 text-sm text-fg-muted">{st.error ?? "Chargement…"}</div>;
+  if (!s) return <div className="p-6 text-sm text-fg-muted">{st.error ?? t("Chargement…")}</div>;
   const maxAgent = Math.max(1, ...s.byAgent.map((a) => a.compute_ms));
   const maxSprint = Math.max(1, ...s.sprints.map((x) => x.planned));
   const tiles: [string, string, string?][] = [
-    ["Temps de calcul", fmtMs(s.usage.compute_ms), `${fmtN(s.usage.calls)} appels au modèle`],
-    ["Tokens", fmtN(s.usage.prompt_tokens + s.usage.completion_tokens), `${fmtN(s.usage.prompt_tokens)} en entrée · ${fmtN(s.usage.completion_tokens)} en sortie`],
-    ["Avancement", `${s.tasks.byStatus.done}/${s.tasks.total} tâches`, s.tasks.points ? `${s.tasks.pointsDone}/${s.tasks.points} points` : "complexité non estimée"],
-    ["Qualité", s.tasks.avgScore !== null ? `${s.tasks.avgScore.toFixed(1)}/5` : "—", `${s.tasks.firstTry} validée(s) du premier coup · ${s.tasks.corrections} correction(s)`],
+    [t("Temps de calcul"), fmtMs(s.usage.compute_ms), t("{n} appels au modèle", { n: fmtN(s.usage.calls) })],
+    [
+      t("Tokens"),
+      fmtN(s.usage.prompt_tokens + s.usage.completion_tokens),
+      t("{in} en entrée · {out} en sortie", { in: fmtN(s.usage.prompt_tokens), out: fmtN(s.usage.completion_tokens) }),
+    ],
+    [
+      t("Avancement"),
+      t("{done}/{total} tâches", { done: s.tasks.byStatus.done, total: s.tasks.total }),
+      s.tasks.points ? t("{done}/{total} points", { done: s.tasks.pointsDone, total: s.tasks.points }) : t("complexité non estimée"),
+    ],
+    [
+      t("Qualité"),
+      s.tasks.avgScore !== null ? `${s.tasks.avgScore.toFixed(1)}/5` : "—",
+      t("{first} validée(s) du premier coup · {fixes} correction(s)", { first: s.tasks.firstTry, fixes: s.tasks.corrections }),
+    ],
   ];
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -1375,16 +1414,16 @@ function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean })
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Temps de calcul par agent</div>
+          <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">{t("Temps de calcul par agent")}</div>
           <div className="flex flex-col gap-2.5 p-4">
             {s.byAgent.map((a) => (
-              <div key={a.agent_id} className="text-xs" title={`${a.name} : ${fmtMs(a.compute_ms)} · ${fmtN(a.calls)} appels · ${fmtN(a.tokens)} tokens`}>
+              <div key={a.agent_id} className="text-xs" title={t("{name} : {time} · {calls} appels · {tokens} tokens", { name: a.name, time: fmtMs(a.compute_ms), calls: fmtN(a.calls), tokens: fmtN(a.tokens) })}>
                 <div className="mb-1 flex justify-between">
                   <span>
-                    {a.emoji} {a.name ?? "agent supprimé"}
+                    {a.emoji} {a.name ?? t("agent supprimé")}
                   </span>
                   <span className="tabular-nums text-fg-muted">
-                    {fmtMs(a.compute_ms)} · {fmtN(a.tokens)} tokens
+                    {fmtMs(a.compute_ms)} · {t("{n} tokens", { n: fmtN(a.tokens) })}
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-surface-3">
@@ -1392,30 +1431,30 @@ function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean })
                 </div>
               </div>
             ))}
-            {!s.byAgent.length && <div className="text-sm text-fg-subtle">Aucune activité enregistrée pour ce projet.</div>}
+            {!s.byAgent.length && <div className="text-sm text-fg-subtle">{t("Aucune activité enregistrée pour ce projet.")}</div>}
           </div>
         </Card>
         <Card>
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-            <span className="text-sm font-semibold">Vélocité par sprint</span>
+            <span className="text-sm font-semibold">{t("Vélocité par sprint")}</span>
             <span className="flex items-center gap-3 text-[11px] text-fg-muted">
               <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-surface-3 ring-1 ring-line-strong" /> planifié
+                <span className="h-2 w-2 rounded-sm bg-surface-3 ring-1 ring-line-strong" /> {t("planifié")}
               </span>
               <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-accent" /> terminé
+                <span className="h-2 w-2 rounded-sm bg-accent" /> {t("terminé")}
               </span>
             </span>
           </div>
           <div className="flex flex-col gap-2.5 p-4">
             {s.sprints.map((x) => (
-              <div key={x.id} className="text-xs" title={`${x.name} : ${x.done}/${x.planned} points terminés (${x.tasks} tâches)`}>
+              <div key={x.id} className="text-xs" title={t("{name} : {done}/{planned} points terminés ({n} tâches)", { name: x.name, done: x.done, planned: x.planned, n: x.tasks })}>
                 <div className="mb-1 flex justify-between">
                   <span>
-                    {x.name} <span className="text-fg-subtle">· {x.status === "active" ? "actif" : x.status === "done" ? "clôturé" : "planifié"}</span>
+                    {x.name} <span className="text-fg-subtle">· {x.status === "active" ? t("actif") : x.status === "done" ? t("clôturé") : t("planifié")}</span>
                   </span>
                   <span className="tabular-nums text-fg-muted">
-                    {x.done}/{x.planned} pts
+                    {t("{done}/{total} pts", { done: x.done, total: x.planned })}
                   </span>
                 </div>
                 <div className="relative h-2 overflow-hidden rounded-full bg-surface-3" style={{ width: `${Math.max(8, (x.planned / maxSprint) * 100)}%` }}>
@@ -1423,31 +1462,31 @@ function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean })
                 </div>
               </div>
             ))}
-            {!s.sprints.length && <div className="text-sm text-fg-subtle">Aucun sprint. Crée-en depuis le tableau, ou laisse « Planifier » les proposer.</div>}
+            {!s.sprints.length && <div className="text-sm text-fg-subtle">{t("Aucun sprint. Crée-en depuis le tableau, ou laisse « Planifier » les proposer.")}</div>}
           </div>
         </Card>
       </div>
       <Card className="overflow-x-auto">
-        <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">Tâches</div>
+        <div className="border-b border-line px-4 py-2.5 text-sm font-semibold">{t("Tâches")}</div>
         <table className="w-full text-xs">
           <tbody>
             {COLUMNS.map((c) => (
               <tr key={c.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-2">
                   <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: c.color }} />
-                  {c.label}
+                  {t(c.label)}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">{s.tasks.byStatus[c.id]}</td>
               </tr>
             ))}
             <tr>
-              <td className="px-4 py-2 text-fg-muted">Estimées (complexité renseignée)</td>
+              <td className="px-4 py-2 text-fg-muted">{t("Estimées (complexité renseignée)")}</td>
               <td className="px-4 py-2 text-right tabular-nums text-fg-muted">
                 {s.tasks.estimated}/{s.tasks.total}
               </td>
             </tr>
             <tr>
-              <td className="px-4 py-2 text-fg-muted">Conversations du projet</td>
+              <td className="px-4 py-2 text-fg-muted">{t("Conversations du projet")}</td>
               <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{s.conversations}</td>
             </tr>
           </tbody>
@@ -1459,20 +1498,21 @@ function ProjectStats({ projectId, busy }: { projectId: string; busy: boolean })
 
 /** Pick dependencies among the project's tasks, excluding the task itself and anything that depends on it. */
 function DependencyPick({ task, tasks, value, onChange }: { task: Partial<Task>; tasks: Task[]; value: string[]; onChange: (v: string[]) => void }) {
+  const { t } = useT();
   const dependents = new Set<string>();
   if (task.id) {
     const stack = [task.id];
     while (stack.length) {
       const id = stack.pop()!;
-      for (const t of tasks)
-        if (t.depends_on?.includes(id) && !dependents.has(t.id)) {
-          dependents.add(t.id);
-          stack.push(t.id);
+      for (const x of tasks)
+        if (x.depends_on?.includes(id) && !dependents.has(x.id)) {
+          dependents.add(x.id);
+          stack.push(x.id);
         }
     }
   }
-  const options = tasks.filter((t) => t.id !== task.id && !dependents.has(t.id));
-  if (!options.length) return <div className="text-xs text-fg-subtle">Aucune autre tâche disponible.</div>;
+  const options = tasks.filter((x) => x.id !== task.id && !dependents.has(x.id));
+  if (!options.length) return <div className="text-xs text-fg-subtle">{t("Aucune autre tâche disponible.")}</div>;
   return (
     <div className="flex flex-wrap gap-1.5">
       {options.map((o) => {
@@ -1497,6 +1537,7 @@ function DependencyPick({ task, tasks, value, onChange }: { task: Partial<Task>;
 // ---------------------------------------------------------------- files
 
 function Files({ projectId, ws, reload, selected, onSelect }: { projectId: string; ws?: Workspace; reload: () => void; selected: string | null; onSelect: (p: string | null) => void }) {
+  const { t } = useT();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const content = useData<{ path: string; absolute: string; content: string }>(selected ? `/api/workspace?projectId=${projectId}&file=${encodeURIComponent(selected)}` : null);
   const { copied, copy } = useCopy();
@@ -1507,8 +1548,8 @@ function Files({ projectId, ws, reload, selected, onSelect }: { projectId: strin
     <div className="grid h-full min-h-0 grid-cols-1 gap-3 p-6 md:grid-cols-[320px_1fr]">
       <div className="flex min-h-0 flex-col rounded-xl border border-line bg-surface-1">
         <div className="flex items-center justify-between border-b border-line px-3 py-2">
-          <span className="text-xs font-medium text-fg-muted">Arborescence</span>
-          <Button size="sm" variant="ghost" onClick={reload} title="Rafraîchir">
+          <span className="text-xs font-medium text-fg-muted">{t("Arborescence")}</span>
+          <Button size="sm" variant="ghost" onClick={reload} title={t("Rafraîchir")}>
             <RefreshCw size={13} />
           </Button>
         </div>
@@ -1547,7 +1588,7 @@ function Files({ projectId, ws, reload, selected, onSelect }: { projectId: strin
               </button>
             );
           })}
-          {!rows.length && <div className="p-3 text-xs text-fg-subtle">Dossier vide. Les agents avec l&apos;outil « Écrire des fichiers » écrivent ici.</div>}
+          {!rows.length && <div className="p-3 text-xs text-fg-subtle">{t("Dossier vide. Les agents avec l'outil « Écrire des fichiers » écrivent ici.")}</div>}
         </div>
       </div>
       <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-surface-1">
@@ -1559,22 +1600,22 @@ function Files({ projectId, ws, reload, selected, onSelect }: { projectId: strin
               </code>
               {file && (
                 <>
-                  <Button size="sm" variant="ghost" onClick={() => copy(file.absolute)} title="Copier le chemin complet">
+                  <Button size="sm" variant="ghost" onClick={() => copy(file.absolute)} title={t("Copier le chemin complet")}>
                     {copied === file.absolute ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => openIn(projectId, "finder", selected)} title="Afficher dans le Finder">
+                  <Button size="sm" variant="ghost" onClick={() => openIn(projectId, "finder", selected)} title={t("Afficher dans le Finder")}>
                     <Folder size={13} />
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => openIn(projectId, "vscode", selected)} title="Ouvrir dans VS Code">
+                  <Button size="sm" variant="ghost" onClick={() => openIn(projectId, "vscode", selected)} title={t("Ouvrir dans VS Code")}>
                     <Code2 size={13} />
                   </Button>
                 </>
               )}
             </div>
-            <pre className="flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">{file?.content ?? (content.error ? `Impossible de lire : ${content.error}` : "…")}</pre>
+            <pre className="flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">{file?.content ?? (content.error ? t("Impossible de lire : {error}", { error: content.error }) : "…")}</pre>
           </>
         ) : (
-          <div className="p-6 text-sm text-fg-subtle">Sélectionne un fichier pour voir son contenu et son chemin complet.</div>
+          <div className="p-6 text-sm text-fg-subtle">{t("Sélectionne un fichier pour voir son contenu et son chemin complet.")}</div>
         )}
       </div>
     </div>

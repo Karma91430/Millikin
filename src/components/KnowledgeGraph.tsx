@@ -3,6 +3,7 @@
 import { forceCollide, forceLink, forceManyBody, forceRadial, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from "d3-force";
 import { ArrowDown, ArrowUp, Pause, Play, RotateCcw, Search, SkipBack, SkipForward, Tags, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useT, type Vars } from "@/i18n";
 import { api, useData, type Kb } from "./api";
 import { Badge, Button, cx, Input, Select } from "./ui";
 
@@ -130,7 +131,24 @@ function usePanZoom() {
 
 const STAGE_MS = 1700;
 
+// Stage labels and details are built in French by the server (src/lib/rag.ts): known patterns are re-keyed for translation.
+const STAGE_PATTERNS: [RegExp, string, string[]][] = [
+  [/^(\d+) passages comparés, (\d+) candidats retenus$/, "{n} passages comparés, {c} candidats retenus", ["n", "c"]],
+  [/^score = ([\d.]+) × vecteur \+ ([\d.]+) × BM25$/, "score = {a} × vecteur + {b} × BM25", ["a", "b"]],
+  [/^diversité : λ = ([\d.]+) \(1 = pertinence seule\)$/, "diversité : λ = {l} (1 = pertinence seule)", ["l"]],
+  [/^le modèle note les (\d+) meilleurs candidats de 0 à 10$/, "le modèle note les {n} meilleurs candidats de 0 à 10", ["n"]],
+  [/^Top (\d+)$/, "Top {k}", ["k"]],
+];
+const stageText = (text: string, t: (fr: string, vars?: Vars) => string) => {
+  for (const [re, key, names] of STAGE_PATTERNS) {
+    const m = text.match(re);
+    if (m) return t(key, Object.fromEntries(names.map((n, i) => [n, m[i + 1]])));
+  }
+  return t(text);
+};
+
 export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }) {
+  const { t } = useT();
   const kbs = useData<Kb[]>("/api/crud/kbs");
   const [kbFilter, setKbFilter] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -186,11 +204,11 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
   useEffect(() => {
     if (!playing || !pipeline) return;
     if (stageIdx >= pipeline.stages.length - 1) {
-      const t = setTimeout(() => setPlaying(false), 0);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => setPlaying(false), 0);
+      return () => clearTimeout(timer);
     }
-    const t = setTimeout(() => setStageIdx((i) => i + 1), stageIdx < 0 ? 900 : STAGE_MS);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setStageIdx((i) => i + 1), stageIdx < 0 ? 900 : STAGE_MS);
+    return () => clearTimeout(timer);
   }, [playing, stageIdx, pipeline]);
 
   async function run() {
@@ -261,46 +279,46 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
         {/* filters */}
         <div className="absolute left-3 right-3 top-3 z-10 flex flex-wrap items-center gap-2">
           <Select className="h-8 w-52 text-xs" value={kbFilter} onChange={(e) => (setKbFilter(e.target.value), setPipeline(null))}>
-            <option value="">Toutes les bases</option>
+            <option value="">{t("Toutes les bases")}</option>
             {(kbs.data ?? []).map((x) => (
               <option key={x.id} value={x.id}>
                 📚 {x.name}
               </option>
             ))}
           </Select>
-          <Button size="sm" variant={showTags ? "primary" : "soft"} onClick={() => setShowTags(!showTags)} title={showTags ? "Masquer les tags" : "Afficher tous les tags"}>
-            <Tags size={13} /> Tags {g?.tags.length ? <span className="opacity-70">{g.tags.length}</span> : null}
+          <Button size="sm" variant={showTags ? "primary" : "soft"} onClick={() => setShowTags(!showTags)} title={showTags ? t("Masquer les tags") : t("Afficher tous les tags")}>
+            <Tags size={13} /> {t("Tags")} {g?.tags.length ? <span className="opacity-70">{g.tags.length}</span> : null}
           </Button>
           {!showTags && tagFilter && (
             <button
               onClick={() => setTagFilter(null)}
               className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white"
               style={{ background: tagColor(tagFilter) }}
-              title="Retirer le filtre"
+              title={t("Retirer le filtre")}
             >
               #{tagFilter} <X size={11} />
             </button>
           )}
           <div className={cx("flex flex-wrap gap-1", !showTags && "hidden")}>
-            {(g?.tags ?? []).map((t) => (
+            {(g?.tags ?? []).map((tg) => (
               <button
-                key={t.tag}
-                onClick={() => setTagFilter(tagFilter === t.tag ? null : t.tag)}
-                className={cx("rounded-full border px-2 py-0.5 text-[11px] backdrop-blur", tagFilter === t.tag ? "text-white" : "bg-black/40 text-fg-muted")}
-                style={{ borderColor: tagColor(t.tag), background: tagFilter === t.tag ? tagColor(t.tag) : undefined }}
+                key={tg.tag}
+                onClick={() => setTagFilter(tagFilter === tg.tag ? null : tg.tag)}
+                className={cx("rounded-full border px-2 py-0.5 text-[11px] backdrop-blur", tagFilter === tg.tag ? "text-white" : "bg-black/40 text-fg-muted")}
+                style={{ borderColor: tagColor(tg.tag), background: tagFilter === tg.tag ? tagColor(tg.tag) : undefined }}
               >
-                #{t.tag} <span className="opacity-70">{t.count}</span>
+                #{tg.tag} <span className="opacity-70">{tg.count}</span>
               </button>
             ))}
           </div>
         </div>
         <div className="absolute bottom-3 left-3 z-10 flex gap-1">
-          <Button size="sm" variant="soft" onClick={fit} title="Ajuster le graphe à l'écran">
+          <Button size="sm" variant="soft" onClick={fit} title={t("Ajuster le graphe à l'écran")}>
             <RotateCcw size={13} />
           </Button>
         </div>
         {g && !g.docs.length ? (
-          <div className="flex h-full items-center justify-center text-sm text-fg-subtle">Aucun document indexé pour l&apos;instant.</div>
+          <div className="flex h-full items-center justify-center text-sm text-fg-subtle">{t("Aucun document indexé pour l'instant.")}</div>
         ) : (
           <svg className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing" {...handlers}>
             <defs>
@@ -388,7 +406,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                 {[...clusters].map(([tag, c]) => {
                   const color = tagColor(tag);
                   const count = nodes.filter((n) => n.kind === "doc" && n.tag === tag).length;
-                  const label = `#${tag || "sans tag"} · ${count}`;
+                  const label = `#${tag || t("sans tag")} · ${count}`;
                   const w = label.length * 7 + 24;
                   const visible = tagVisible(tag);
                   return (
@@ -449,7 +467,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                           )}
                           {hover === n.id && (
                             <text textAnchor="middle" y={r + 28} fontSize={10} fill="#697287">
-                              {n.doc!.tags.map((t) => `#${t}`).join(" ")} · {n.doc!.chunks} passages
+                              {n.doc!.tags.map((tg) => `#${tg}`).join(" ")} · {t("{n} passages", { n: n.doc!.chunks })}
                             </text>
                           )}
                         </g>
@@ -464,7 +482,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
                     🧠
                   </text>
                   <text textAnchor="middle" y={66} fontSize={11} fill="#9aa3b5">
-                    {g?.docs.length ?? 0} documents · {g?.tags.length ?? 0} tags
+                    {t("{d} documents · {n} tags", { d: g?.docs.length ?? 0, n: g?.tags.length ?? 0 })}
                   </text>
                 </g>
                 {/* query orb */}
@@ -480,7 +498,7 @@ export function KnowledgeGraph({ onOpenDoc }: { onOpenDoc: (doc: GDoc) => void }
         )}
         {stage && (
           <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-4 py-1.5 text-xs text-fg backdrop-blur">
-            <b style={{ color: isFinal ? GOLD : "#b9adff" }}>{stage.label}</b> · {stage.detail}
+            <b style={{ color: isFinal ? GOLD : "#b9adff" }}>{stageText(stage.label, t)}</b> · {stageText(stage.detail, t)}
           </div>
         )}
       </div>
@@ -547,6 +565,7 @@ function SearchLab(p: {
   prevStage: Stage | null;
   cands: Map<string, Candidate>;
 }) {
+  const { t } = useT();
   const { pipeline, stage, prevStage, cands } = p;
   const shown = pipeline ? pipeline.stages[0].order.slice(0, 10) : [];
   // Rows keep their identity; only their vertical position follows the current stage's ranking.
@@ -557,7 +576,7 @@ function SearchLab(p: {
   return (
     <aside className="flex w-[380px] shrink-0 flex-col border-l border-line bg-surface-0">
       <div className="flex flex-col gap-2.5 border-b border-line p-3">
-        <div className="text-sm font-semibold">Laboratoire de recherche</div>
+        <div className="text-sm font-semibold">{t("Laboratoire de recherche")}</div>
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -565,41 +584,41 @@ function SearchLab(p: {
             p.onRun();
           }}
         >
-          <Input value={p.q} onChange={(e) => p.setQ(e.target.value)} placeholder="Pose une question…" className="h-8 text-xs" />
+          <Input value={p.q} onChange={(e) => p.setQ(e.target.value)} placeholder={t("Pose une question…")} className="h-8 text-xs" />
           <Button size="sm" variant="primary" type="submit" disabled={p.busy || !p.q.trim()}>
-            <Search size={13} /> {p.busy ? "…" : "Chercher"}
+            <Search size={13} /> {p.busy ? "…" : t("Chercher")}
           </Button>
         </form>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <label className="flex flex-col gap-1">
-            <span className="text-fg-muted">Recherche</span>
+            <span className="text-fg-muted">{t("Recherche")}</span>
             <Select className="h-7 text-[11px]" value={p.hybrid ? "on" : "off"} onChange={(e) => p.setHybrid(e.target.value === "on")}>
-              <option value="on">Hybride (sens + mots-clés)</option>
-              <option value="off">Vectorielle seule</option>
+              <option value="on">{t("Hybride (sens + mots-clés)")}</option>
+              <option value="off">{t("Vectorielle seule")}</option>
             </Select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-fg-muted">Reranking</span>
             <Select className="h-7 text-[11px]" value={p.rerank} onChange={(e) => p.setRerank(e.target.value as "none" | "mmr" | "llm")}>
-              <option value="none">Aucun</option>
-              <option value="mmr">MMR (diversité)</option>
-              <option value="llm">LLM (pertinence)</option>
+              <option value="none">{t("Aucun")}</option>
+              <option value="mmr">{t("MMR (diversité)")}</option>
+              <option value="llm">{t("LLM (pertinence)")}</option>
             </Select>
           </label>
           {p.hybrid && (
             <label className="col-span-2 flex items-center gap-2">
-              <span className="w-24 text-fg-muted">Poids du sens {p.alpha.toFixed(2)}</span>
+              <span className="w-24 text-fg-muted">{t("Poids du sens {v}", { v: p.alpha.toFixed(2) })}</span>
               <input type="range" min={0} max={1} step={0.05} value={p.alpha} onChange={(e) => p.setAlpha(Number(e.target.value))} className="flex-1 accent-[var(--accent)]" />
             </label>
           )}
           {p.rerank === "mmr" && (
             <label className="col-span-2 flex items-center gap-2">
-              <span className="w-24 text-fg-muted">Pertinence λ {p.lambda.toFixed(2)}</span>
+              <span className="w-24 text-fg-muted">{t("Pertinence λ {v}", { v: p.lambda.toFixed(2) })}</span>
               <input type="range" min={0} max={1} step={0.05} value={p.lambda} onChange={(e) => p.setLambda(Number(e.target.value))} className="flex-1 accent-[var(--accent)]" />
             </label>
           )}
           <label className="col-span-2 flex items-center gap-2">
-            <span className="w-24 text-fg-muted">Passages retenus</span>
+            <span className="w-24 text-fg-muted">{t("Passages retenus")}</span>
             <Select className="h-7 w-20 text-[11px]" value={p.k} onChange={(e) => p.setK(Number(e.target.value))}>
               {[2, 3, 4, 5, 6, 8].map((n) => (
                 <option key={n} value={n}>
@@ -617,17 +636,17 @@ function SearchLab(p: {
         <div className="border-b border-line p-3">
           {/* stepper */}
           <div className="mb-2 flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => p.setStageIdx(Math.max(0, p.stageIdx - 1))} aria-label="Étape précédente">
+            <Button size="sm" variant="ghost" onClick={() => p.setStageIdx(Math.max(0, p.stageIdx - 1))} aria-label={t("Étape précédente")}>
               <SkipBack size={13} />
             </Button>
-            <Button size="sm" variant="soft" onClick={p.onPlay} aria-label={p.playing ? "Pause" : "Lecture"}>
+            <Button size="sm" variant="soft" onClick={p.onPlay} aria-label={p.playing ? t("Pause") : t("Lecture")}>
               {p.playing ? <Pause size={13} /> : <Play size={13} />}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => p.setStageIdx(Math.min(pipeline.stages.length - 1, p.stageIdx + 1))} aria-label="Étape suivante">
+            <Button size="sm" variant="ghost" onClick={() => p.setStageIdx(Math.min(pipeline.stages.length - 1, p.stageIdx + 1))} aria-label={t("Étape suivante")}>
               <SkipForward size={13} />
             </Button>
             <div className="flex-1" />
-            <Button size="sm" variant="ghost" onClick={p.onClear} aria-label="Effacer">
+            <Button size="sm" variant="ghost" onClick={p.onClear} aria-label={t("Effacer")}>
               <X size={13} />
             </Button>
           </div>
@@ -648,8 +667,8 @@ function SearchLab(p: {
                     {i + 1}
                   </span>
                   <span className="flex-1">
-                    <span className="block font-medium">{s.label}</span>
-                    {i === p.stageIdx && <span className="block text-[10px] text-fg-muted">{s.detail}</span>}
+                    <span className="block font-medium">{stageText(s.label, t)}</span>
+                    {i === p.stageIdx && <span className="block text-[10px] text-fg-muted">{stageText(s.detail, t)}</span>}
                   </span>
                   {s.ms > 0 && <span className="tabular-nums text-[10px] text-fg-subtle">{s.ms} ms</span>}
                 </button>
@@ -663,8 +682,9 @@ function SearchLab(p: {
       <div className="relative flex-1 overflow-y-auto p-3">
         {!pipeline && (
           <p className="text-xs leading-relaxed text-fg-subtle">
-            Lance une recherche pour voir son déroulé : les passages candidats s&apos;allument dans le graphe, puis leur classement évolue à chaque étape (hybride, reranking) jusqu&apos;aux passages
-            finalement transmis à l&apos;agent, en doré.
+            {t(
+              "Lance une recherche pour voir son déroulé : les passages candidats s'allument dans le graphe, puis leur classement évolue à chaque étape (hybride, reranking) jusqu'aux passages finalement transmis à l'agent, en doré.",
+            )}
           </p>
         )}
         {pipeline && (

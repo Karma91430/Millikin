@@ -1,12 +1,14 @@
 "use client";
 
-import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Library, Loader2, MessagesSquare, Plug, Settings, Users, X, XCircle } from "lucide-react";
+import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, MessagesSquare, Plug, Settings, Users, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { I18nProvider, LANGS, useT, type Lang } from "@/i18n";
 import { api, useData, type Agent, type Meta, type Project, type RunInfo, type Team } from "./api";
 import { ChatView, type Target } from "./chat/ChatView";
 import { cx } from "./ui";
 import { AgentsView } from "./views/AgentsView";
 import { KnowledgeView } from "./views/KnowledgeView";
+import { MachineView } from "./views/MachineView";
 import { McpView } from "./views/McpView";
 import { ModelsView } from "./views/ModelsView";
 import { ProjectsView } from "./views/ProjectsView";
@@ -23,11 +25,44 @@ const NAV = [
   { id: "knowledge", label: "Connaissances", icon: Library },
   { id: "mcp", label: "MCP", icon: Plug },
   { id: "models", label: "Modèles", icon: Cpu },
+  { id: "machine", label: "Machine", icon: Gauge },
   { id: "settings", label: "Réglages", icon: Settings },
 ] as const;
 type View = (typeof NAV)[number]["id"];
 
 export function App() {
+  // Language: localStorage for an instant first paint, the server setting (agents' answers) as the source of truth.
+  const [lang, setLangState] = useState<Lang>(() => {
+    try {
+      return localStorage.getItem("millikin:lang") === "en" ? "en" : "fr";
+    } catch {
+      return "fr";
+    }
+  });
+  const settings = useData<Record<string, string>>("/api/settings");
+  const serverLang = settings.data?.language === "en" ? "en" : settings.data ? "fr" : null;
+  // Adopt the server's language once it is known (render-time sync, no effect needed).
+  const [seenServer, setSeenServer] = useState<Lang | null>(null);
+  if (serverLang && serverLang !== seenServer) {
+    setSeenServer(serverLang);
+    if (serverLang !== lang) setLangState(serverLang);
+  }
+  const setLang = useCallback((l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem("millikin:lang", l);
+    } catch {}
+    api("/api/settings", { method: "POST", json: { language: l } }).catch(() => {});
+  }, []);
+  return (
+    <I18nProvider lang={lang} setLang={setLang}>
+      <Workspace />
+    </I18nProvider>
+  );
+}
+
+function Workspace() {
+  const { t: tr, lang, setLang } = useT();
   // Rendered client-only (see ClientApp), so localStorage is safe in the initializer.
   const [view, setView] = useState<View>(() => {
     try {
@@ -82,8 +117,8 @@ export function App() {
   };
   const targetName = (r: RunInfo) =>
     r.targetType === "agent"
-      ? (agents.data?.find((x) => x.id === r.targetId)?.name ?? "Agent")
-      : `${r.targetType === "task" ? "Tâche · " : ""}${projects.data?.find((x) => x.id === r.targetId)?.name ?? "Projet"}`;
+      ? (agents.data?.find((x) => x.id === r.targetId)?.name ?? tr("Agent"))
+      : `${r.targetType === "task" ? `${tr("Tâche")} · ` : ""}${projects.data?.find((x) => x.id === r.targetId)?.name ?? tr("Projet")}`;
 
   const refreshAll = () => {
     agents.reload();
@@ -110,7 +145,7 @@ export function App() {
           <button
             key={id}
             onClick={() => go(id)}
-            title={label}
+            title={tr(label)}
             className={cx(
               "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm transition",
               view === id ? "bg-accent/15 text-fg" : "text-fg-muted hover:bg-surface-2 hover:text-fg",
@@ -124,12 +159,12 @@ export function App() {
                 </span>
               )}
             </span>
-            <span className="hidden xl:block">{label}</span>
+            <span className="hidden xl:block">{tr(label)}</span>
           </button>
         ))}
         {running.length > 0 && (
           <div className="mt-4 hidden flex-col gap-1 xl:flex">
-            <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">En cours</div>
+            <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("En cours")}</div>
             {running.map((r) => (
               <button key={r.id} onClick={() => openRun(r)} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-fg-muted hover:bg-surface-2" title={r.title}>
                 <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
@@ -141,12 +176,28 @@ export function App() {
             ))}
           </div>
         )}
-        <div className="mt-auto hidden px-2.5 text-[11px] text-fg-subtle xl:block">100 % local · Ollama</div>
+        <div className="mt-auto flex flex-col gap-2 px-1 xl:px-2.5">
+          <div className="flex items-center gap-0.5 rounded-lg border border-line p-0.5" title={tr("Langue de l'interface et des réponses des agents")}>
+            <Languages size={14} className="mx-1 hidden shrink-0 text-fg-subtle xl:block" />
+            {LANGS.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => setLang(l.id)}
+                aria-pressed={lang === l.id}
+                title={l.label}
+                className={cx("flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium uppercase", lang === l.id ? "bg-accent/20 text-fg" : "text-fg-subtle hover:text-fg")}
+              >
+                {l.id}
+              </button>
+            ))}
+          </div>
+          <div className="hidden text-[11px] text-fg-subtle xl:block">{tr("100 % local · Ollama")}</div>
+        </div>
       </nav>
 
       <main className="min-w-0 flex-1 overflow-hidden">
         {!agents.data || !teams.data ? (
-          <div className="flex h-full items-center justify-center text-sm text-fg-muted">{agents.error || teams.error || "Chargement…"}</div>
+          <div className="flex h-full items-center justify-center text-sm text-fg-muted">{agents.error || teams.error || tr("Chargement…")}</div>
         ) : view === "chat" ? (
           <ChatView
             agents={a}
@@ -182,6 +233,7 @@ export function App() {
             {view === "knowledge" && <KnowledgeView />}
             {view === "mcp" && <McpView />}
             {view === "models" && <ModelsView onChange={meta.reload} />}
+            {view === "machine" && <MachineView onChange={meta.reload} />}
             {view === "settings" && m && <SettingsView meta={m} />}
           </div>
         )}
@@ -193,15 +245,15 @@ export function App() {
           <div key={r.id} className="pop pointer-events-auto flex items-start gap-2.5 rounded-xl border border-line bg-surface-1 p-3 shadow-2xl">
             {r.status === "done" ? <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-emerald-400" /> : <XCircle size={17} className="mt-0.5 shrink-0 text-red-400" />}
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">{r.status === "done" ? "Réponse prête" : r.status === "stopped" ? "Réponse arrêtée" : "Échec de la réponse"}</div>
+              <div className="text-sm font-medium">{r.status === "done" ? tr("Réponse prête") : r.status === "stopped" ? tr("Réponse arrêtée") : tr("Échec de la réponse")}</div>
               <div className="truncate text-xs text-fg-muted">
                 {targetName(r)} · {r.title}
               </div>
               <button onClick={() => openRun(r)} className="mt-1.5 text-xs font-medium text-accent hover:underline">
-                Ouvrir la conversation
+                {tr("Ouvrir la conversation")}
               </button>
             </div>
-            <button onClick={() => setToasts((t) => t.filter((x) => x.id !== r.id))} className="text-fg-subtle hover:text-fg" aria-label="Fermer">
+            <button onClick={() => setToasts((t) => t.filter((x) => x.id !== r.id))} className="text-fg-subtle hover:text-fg" aria-label={tr("Fermer")}>
               <X size={14} />
             </button>
           </div>
