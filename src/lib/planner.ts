@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendDecision } from "./decisions";
-import { get, list, newId, now, upsert, type Agent, type Project, type Sprint, type Task } from "./db";
+import { get, list, newId, now, remove, upsert, type Agent, type Project, type Sprint, type Task } from "./db";
 import { complete } from "./gateway";
 import { runAgent, slugify, teamRuntime } from "./orchestrator";
 import { activeRunFor, startRun, type Run } from "./runs";
@@ -159,6 +159,7 @@ export async function planProject(opts: { project: Project; brief?: string; spri
   const ctx = { workspace, projectId, team: members };
   const existing = list<Task>("tasks").filter((t) => t.project_id === projectId);
   const sprints = list<Sprint>("sprints").filter((s) => s.project_id === projectId);
+  const openSprints = sprints.filter((s) => s.status !== "done");
   const tree = await fileTree(workspace);
 
   const input = `Planifie le projet « ${project.name} ».
@@ -168,7 +169,7 @@ ${members.map((m) => `- ${m.name} : ${m.role}`).join("\n")}
 
 Tâches déjà présentes (ne les recrée pas) :
 ${existing.length ? existing.map((t) => `- [${t.status}] ${t.title}`).join("\n") : "(aucune)"}
-
+${openSprints.length ? `\nSprints déjà ouverts (réutilise exactement leur nom dans "sprint" s'ils conviennent, sans les recréer) :\n${openSprints.map((sp) => `- ${sp.name}${sp.goal ? ` : ${sp.goal}` : ""}`).join("\n")}\n` : ""}
 Fichiers du projet :
 ${tree.length ? tree.join("\n") : "(dossier vide)"}
 
@@ -183,7 +184,7 @@ ${opts.sprints ? "Regroupe les lots en sprints cohérents (2 à 4 sprints, chacu
 
 Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREMENT par un bloc JSON de cette forme :
 \`\`\`json
-{"sprints": [{"ref": "S1", "name": "Sprint 1", "goal": "…"}],
+{"sprints": [{"ref": "S1", "name": "Nom court qui décrit l'objectif du sprint", "goal": "…"}],
  "tasks": [{"ref": "T1", "title": "…", "description": "…", "assignee": "Nom du membre", "priority": "high|normal|low", "complexity": 3, "depends_on": [], "sprint": "S1"},
            {"ref": "T2", "title": "…", "description": "…", "assignee": "…", "priority": "normal", "complexity": 2, "depends_on": ["T1"], "sprint": "S1"}
           ]}
@@ -212,8 +213,10 @@ Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREM
   if (granularity !== "macro" && plan.tasks?.length)
     plan.tasks = await refineLots({ lots: plan.tasks.filter((t) => t.title), granularity, project, members, model: planner.model, emit, signal });
 
-  // Sprints first, so tasks can reference them.
+  // Sprints first, so tasks can reference them; existing open sprints are reused by name.
   const sprintIds = new Map<string, string>();
+  for (const sp of openSprints) sprintIds.set(sp.name, sp.id);
+  const newSprints: string[] = [];
   if (opts.sprints)
     (plan.sprints ?? []).forEach((s, i) => {
       const created = upsert<Sprint>("sprints", {
@@ -222,6 +225,7 @@ Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREM
         goal: String(s.goal ?? "").slice(0, 500),
         status: "planned",
       });
+      newSprints.push(created.id);
       sprintIds.set(String(s.ref ?? s.name ?? i), created.id);
       if (s.name) sprintIds.set(String(s.name), created.id);
     });
@@ -254,7 +258,10 @@ Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREM
     if (deps.length) upsert("tasks", { id: created[i].id, depends_on: deps });
   }
 
-  const sprintCount = new Set(sprintIds.values()).size;
+  // Only keep the sprints the plan actually uses: no empty "Sprint 1 / Sprint 2" left behind.
+  const used = new Set(created.map((t) => t.sprint_id).filter(Boolean));
+  for (const id of newSprints) if (!used.has(id)) remove("sprints", id);
+  const sprintCount = used.size;
   await appendDecision(
     workspace,
     `Planification : ${created.length} tâche(s)${sprintCount ? `, ${sprintCount} sprint(s)` : ""}`,
