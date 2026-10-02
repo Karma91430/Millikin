@@ -1,9 +1,9 @@
 "use client";
 
-import { Blocks, FileUp, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Blocks, FileUp, Library, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, crud, useData, type Skill } from "../api";
-import { Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, PageHeader, Textarea } from "../ui";
+import { Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, PageHeader, Textarea } from "../ui";
 
 /** Parse a SKILL.md (YAML-ish frontmatter with name/description, then the body). */
 function parseSkillMd(text: string, fallbackName: string): Partial<Skill> {
@@ -17,6 +17,76 @@ function parseSkillMd(text: string, fallbackName: string): Partial<Skill> {
   return { name: meta.name || fallbackName, description: meta.description || "", content: m[2].trim() };
 }
 
+type LibrarySkill = { name: string; description: string; content: string; profiles: string[]; installed: boolean };
+
+/** Built-in skills: pick the ones to install, optionally giving them to the matching agents. */
+function SkillLibrary({ onClose, onInstalled }: { onClose: () => void; onInstalled: () => void }) {
+  const lib = useData<LibrarySkill[]>("/api/skills/library");
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const [assign, setAssign] = useState(true);
+  const [result, setResult] = useState<string>();
+  const available = (lib.data ?? []).filter((s) => !s.installed).map((s) => s.name);
+  const sel = picked ?? available;
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Bibliothèque de skills"
+      footer={
+        <>
+          <label className="mr-auto flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={assign} onChange={(e) => setAssign(e.target.checked)} className="accent-[var(--accent)]" />
+            Attribuer aux agents des profils recommandés
+          </label>
+          <Button variant="ghost" onClick={onClose}>
+            Fermer
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!sel.length && !assign}
+            onClick={async () => {
+              // Nothing new to add: (re)assign the installed library skills to the matching agents.
+              const names = sel.length ? sel : (lib.data ?? []).filter((s) => s.installed).map((s) => s.name);
+              const r = await api<{ added: number; assigned: number }>("/api/skills/library", { method: "POST", json: { names, assign } });
+              setResult(`${r.added} skill(s) ajouté(s)${assign ? `, ${r.assigned} agent(s) mis à jour` : ""}.`);
+              setPicked([]);
+              lib.reload();
+              onInstalled();
+            }}
+          >
+            {sel.length ? `Ajouter ${sel.length}` : "Attribuer aux agents"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        {result && <div className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">{result}</div>}
+        <p className="text-xs text-fg-muted">Des méthodes courtes et des formats de sortie, pensés pour les modèles locaux. Chaque skill est ajouté au prompt des agents qui le possèdent.</p>
+        <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-line">
+          {(lib.data ?? []).map((s) => (
+            <label key={s.name} className={cx("flex items-start gap-3 border-b border-line px-3 py-2 last:border-0", s.installed ? "opacity-60" : "cursor-pointer hover:bg-surface-2")}>
+              <input
+                type="checkbox"
+                disabled={s.installed}
+                checked={s.installed || sel.includes(s.name)}
+                onChange={() => setPicked(sel.includes(s.name) ? sel.filter((n) => n !== s.name) : [...sel, s.name])}
+                className="mt-1 accent-[var(--accent)]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  {s.name} {s.installed && <Badge>installé</Badge>}
+                </span>
+                <span className="block text-xs text-fg-muted">{s.description}</span>
+                <span className="block text-[11px] text-fg-subtle">Pour : {s.profiles.join(", ")}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function SkillsView() {
   const skills = useData<Skill[]>("/api/crud/skills");
   const [cur, setCur] = useState<Partial<Skill> | null>(null);
@@ -24,6 +94,7 @@ export function SkillsView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [preview, setPreview] = useState(false);
+  const [library, setLibrary] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const save = async () => {
@@ -53,6 +124,9 @@ export function SkillsView() {
                 skills.reload();
               }}
             />
+            <Button onClick={() => setLibrary(true)}>
+              <Library size={15} /> Bibliothèque
+            </Button>
             <Button onClick={() => fileRef.current?.click()}>
               <FileUp size={15} /> Importer SKILL.md
             </Button>
@@ -150,6 +224,7 @@ export function SkillsView() {
           )}
         </div>
       </div>
+      {library && <SkillLibrary onClose={() => setLibrary(false)} onInstalled={skills.reload} />}
     </div>
   );
 }
