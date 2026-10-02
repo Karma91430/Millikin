@@ -1,10 +1,13 @@
 // Launch board tasks: the assignee does the work, then a first contact reviews it and sets the status.
 // Tasks can depend on others: dependencies' results and the project's decision log are passed along,
 // and a chain run executes a whole set of tasks in dependency order.
+import fs from "node:fs/promises";
+import path from "node:path";
 import { appendDecision } from "./decisions";
 import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
+import type { TraceEvent } from "./trace";
 import { workspaceFor } from "./tools";
 
 const BOARD_WRITE = ["board_add_card", "board_update_card"];
@@ -22,11 +25,85 @@ function parseEvaluation(text: string, by: string): Evaluation {
       return { verdict, score: Math.min(5, Math.max(1, Math.round(Number(j.score) || 3))), comment: String(j.commentaire ?? j.comment ?? "").slice(0, 1500), by, at: now() };
     } catch {}
   }
-  const verdict = /à corriger|a_corriger|a corriger|non valid/i.test(text) ? "a_corriger" : "valide";
-  return { verdict, score: verdict === "valide" ? 4 : 2, comment: text.replace(/\s+/g, " ").slice(-600), by, at: now() };
+  // No JSON verdict: only an explicit "valide" without reservation counts; an empty or unclear review never validates.
+  const clean = text.replace(/\(pas de réponse[^)]*\)/g, "").trim();
+  const valid = clean.length > 40 && /\bvalid[ée]e?\b/i.test(clean) && !/à corriger|a_corriger|a corriger|non valid|incomplet|manquant/i.test(clean);
+  return {
+    verdict: valid ? "valide" : "a_corriger",
+    score: valid ? 3 : 2,
+    comment: clean ? clean.replace(/\s+/g, " ").slice(-600) : "Le contrôle n'a rendu aucun verdict exploitable : la tâche est relancée.",
+    by,
+    at: now(),
+  };
 }
 
 const projectTasks = (projectId: string) => list<Task>("tasks").filter((t) => t.project_id === projectId);
+
+/** What an attempt really did, recorded from its tool events (the report is the agent's claim, this is the fact). */
+type Actions = { written: Set<string>; failedEdits: number; commands: { command: string; result: string }[] };
+function recorder(emit: (ev: TraceEvent) => void) {
+  const actions: Actions = { written: new Set(), failedEdits: 0, commands: [] };
+  const pending = new Map<string, { name: string; args: Record<string, unknown> }>();
+  const tap = (ev: TraceEvent) => {
+    if (ev.type === "tool_call") pending.set(ev.toolCallId, { name: ev.name, args: (typeof ev.args === "string" ? safeJson(ev.args) : ev.args) as Record<string, unknown> });
+    if (ev.type === "tool_result") {
+      const call = pending.get(ev.toolCallId);
+      const m = ev.result.match(/^Fichier (?:écrit|modifié) : (\S+)/);
+      if (m) actions.written.add(m[1]);
+      else if (call?.name === "edit_file" && ev.result.startsWith("Échec")) actions.failedEdits++;
+      if (call?.name === "run_command") actions.commands.push({ command: String(call.args?.command ?? ""), result: ev.result.slice(0, 200) });
+    }
+    emit(ev);
+  };
+  return { actions, tap };
+}
+const safeJson = (s: string) => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
+};
+
+const FILE_RE = /(?<![\w/.-])((?:[\w.-]+\/)*[\w-]+\.(?:py|ts|tsx|js|jsx|json|md|csv|txt|toml|ya?ml|html|css|sql|sh|ipynb))(?![\w/])/g;
+
+const LIBRARY_NAMES = /^(node|next|vue|nuxt|chart|d3|three|express|react|deno|bun|socket\.io)\.js$/i;
+
+async function projectFiles(dir: string, base = dir, out = new Set<string>()) {
+  for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", "dist"].includes(e.name)) continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) await projectFiles(full, base, out);
+    else out.add(path.relative(base, full));
+  }
+  return out;
+}
+
+/** Files named in the report that are not in the project folder (a bare name matches any file with that name). */
+async function missingFiles(report: string, workspace: string) {
+  const named = [...new Set([...report.matchAll(FILE_RE)].map((m) => m[1].replace(/^\.\//, "")))].filter((f) => !LIBRARY_NAMES.test(f));
+  if (!named.length) return [];
+  const files = await projectFiles(workspace);
+  const names = new Set([...files].map((f) => path.basename(f)));
+  return named.filter((f) => !files.has(f) && !(f.includes("/") ? false : names.has(f)));
+}
+
+/** Facts for the reviewer: what was really written, failed edits, commands, and the content of the files written. */
+async function factsFor(actions: Actions, workspace: string) {
+  const lines: string[] = [];
+  lines.push(actions.written.size ? `Fichiers réellement écrits ou modifiés pendant cette tentative : ${[...actions.written].join(", ")}` : "Aucun fichier n'a été écrit ni modifié pendant cette tentative.");
+  if (actions.failedEdits) lines.push(`${actions.failedEdits} modification(s) de fichier ont échoué (edit_file).`);
+  for (const c of actions.commands.slice(0, 5)) lines.push(`Commande : ${c.command} → ${c.result.split("\n")[0]}`);
+  let budget = 9000;
+  for (const f of [...actions.written].slice(0, 4)) {
+    const content = await fs.readFile(path.join(workspace, f), "utf8").catch(() => null);
+    if (content === null || budget <= 0) continue;
+    const part = content.length > Math.min(3500, budget) ? content.slice(0, Math.min(3500, budget)) + "\n… (tronqué)" : content;
+    budget -= part.length;
+    lines.push(`\n### Contenu actuel de ${f}\n\`\`\`\n${part}\n\`\`\``);
+  }
+  return lines.join("\n");
+}
 
 /** Dependencies that are not done yet. */
 export function blockersOf(task: Task, all: Task[]): Task[] {
@@ -102,48 +179,70 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
         try {
           lastError = "";
           // The board is driven by the task run itself: the assignee must not add or move cards.
-          const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, throwErrors: true, emit, signal, ctx, excludeTools: BOARD_WRITE });
+          const { actions, tap } = recorder(emit);
+          const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, throwErrors: true, emit: tap, signal, ctx, excludeTools: BOARD_WRITE });
           t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
-          // Without a reviewer the task stays "En revue" for a person to check.
-          if (reviewer) {
-            const review = await runAgent({
-              agent: reviewer,
-              depth: 1,
-              throwErrors: true,
-              consultOnly: true,
-              // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
-              excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
-              phase: "execution",
-              team,
-              emit,
-              signal,
-              ctx,
-              input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
+          // Hard check before any review: files announced in the report must exist.
+          const missing = await missingFiles(result, ctx.workspace);
+          if (missing.length) {
+            const evaluation: Evaluation = {
+              verdict: "a_corriger",
+              score: 1,
+              comment: `Fichiers annoncés dans le compte rendu mais absents du dossier du projet : ${missing.join(", ")}. Crée-les réellement avec write_file (contenu complet), puis vérifie avec list_files avant de conclure.`,
+              by: "Millikin",
+              at: now(),
+            };
+            t = upsert<Task>("tasks", { id: t.id, evaluation, status: "retry", notes: note(t, "Millikin", `↩️ Vérification automatique : ${evaluation.comment}`) });
+          } else {
+            const facts = await factsFor(actions, ctx.workspace);
 
-Consigne de la tâche :
-${t.description || t.title}
+            // Without a reviewer the task stays "En revue" for a person to check.
+            if (reviewer) {
+              const review = await runAgent({
+                agent: reviewer,
+                depth: 1,
+                throwErrors: true,
+                consultOnly: true,
+                // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
+                excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
+                phase: "execution",
+                team,
+                emit,
+                signal,
+                ctx,
+                input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
 
-Compte rendu de ${assignee.name} :
-${result}
+  Consigne de la tâche :
+  ${t.description || t.title}
 
-Vérifie le travail (lis les fichiers du projet si tu en as l'outil) : conformité à la consigne, cohérence avec les tâches dont elle dépend et avec les décisions du projet, qualité, oublis.
-Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
-{"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
-            });
-            const evaluation = parseEvaluation(review, reviewer.name);
-            t = upsert<Task>("tasks", {
-              id: t.id,
-              evaluation,
-              status: evaluation.verdict === "valide" ? "done" : "retry",
-              notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
-            });
-            await appendDecision(
-              ctx.workspace,
-              `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
-              `Réalisée par ${assignee.name}. ${evaluation.comment}`,
-              reviewer.name,
-            ).catch(() => {});
+  Compte rendu de ${assignee.name} (ce qu'il affirme) :
+  ${result}
+
+  ## Ce que Millikin a constaté (fait foi, relevé automatiquement)
+  ${facts}
+
+  Vérifie le TRAVAIL RÉEL, pas les intentions : juge d'après les fichiers et leur contenu ci-dessus (et lis-en d'autres si besoin), pas d'après le compte rendu.
+  - Si la consigne demande du code ou des documents et qu'aucun fichier pertinent n'a été écrit ou modifié, le verdict est « a_corriger ».
+  - Un compte rendu qui décrit ce qui « serait fait » ou « devrait être fait » sans l'avoir fait est « a_corriger ».
+  - Vérifie aussi la conformité à la consigne, la cohérence avec les tâches dont elle dépend et les décisions du projet, la qualité, les oublis.
+  Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
+  {"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
+              });
+              const evaluation = parseEvaluation(review, reviewer.name);
+              t = upsert<Task>("tasks", {
+                id: t.id,
+                evaluation,
+                status: evaluation.verdict === "valide" ? "done" : "retry",
+                notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
+              });
+              await appendDecision(
+                ctx.workspace,
+                `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
+                `Réalisée par ${assignee.name}. ${evaluation.comment}`,
+                reviewer.name,
+              ).catch(() => {});
+            }
           }
         } catch (e) {
           const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);

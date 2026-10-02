@@ -186,13 +186,31 @@ export const TOOL_GROUPS: Group[] = [
           ["path", "old_text", "new_text"],
         ),
         async (a) => {
-          const p = await inside(ctx.workspace, String(a.path ?? ""));
+          if (!a.path) return "Échec : chemin manquant (paramètre path).";
+          if (!a.old_text) return "Échec : old_text manquant. Pour réécrire tout le fichier, utilise write_file avec le contenu complet.";
+          const p = await inside(ctx.workspace, String(a.path));
           const text = await fs.readFile(p, "utf8");
-          const oldText = String(a.old_text ?? "");
-          const n = oldText ? text.split(oldText).length - 1 : 0;
-          if (n !== 1) return `Échec : le passage apparaît ${n} fois (il doit être unique). Relis le fichier avec read_file.`;
-          await fs.writeFile(p, text.replace(oldText, String(a.new_text ?? "")), "utf8");
-          return `Fichier modifié : ${path.relative(ctx.workspace, p)}`;
+          const oldText = String(a.old_text);
+          const newText = String(a.new_text ?? "");
+          const n = text.split(oldText).length - 1;
+          if (n === 1) {
+            await fs.writeFile(p, text.replace(oldText, newText), "utf8");
+            return `Fichier modifié : ${path.relative(ctx.workspace, p)}`;
+          }
+          // Small models rarely copy indentation exactly: retry on lines compared without surrounding spaces.
+          if (n === 0) {
+            const lines = text.split("\n");
+            const want = oldText.split("\n").map((l) => l.trim());
+            while (want.length && !want[want.length - 1]) want.pop();
+            const hits: number[] = [];
+            for (let i = 0; want.length && i + want.length <= lines.length; i++) if (want.every((w, k) => lines[i + k].trim() === w)) hits.push(i);
+            if (hits.length === 1) {
+              lines.splice(hits[0], want.length, ...newText.split("\n"));
+              await fs.writeFile(p, lines.join("\n"), "utf8");
+              return `Fichier modifié : ${path.relative(ctx.workspace, p)} (passage retrouvé malgré une indentation différente)`;
+            }
+          }
+          return `Échec : le passage apparaît ${n} fois (il doit être unique et copié à l'identique depuis read_file). Relis le fichier, ou réécris-le entièrement avec write_file.`;
         },
       ],
     ],
