@@ -88,6 +88,7 @@ const COLUMNS: [string, string, string][] = [
   ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
   ["projects", "resources", "TEXT DEFAULT '{}'"],
   ["conversations", "kind", "TEXT DEFAULT ''"],
+  ["skills", "category", "TEXT DEFAULT ''"],
   ["agents", "rag", "TEXT DEFAULT '{}'"],
 ];
 
@@ -230,7 +231,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     cols: ["category", "name", "role", "emoji", "color", "system_prompt", "tools", "think"],
     order: "name",
   },
-  skills: { table: "skills", json: [], bool: [], cols: ["name", "description", "content"], order: "name" },
+  skills: { table: "skills", json: [], bool: [], cols: ["name", "description", "content", "category"], order: "name" },
   mcp: {
     table: "mcp_servers",
     json: ["args", "env", "headers"],
@@ -372,7 +373,7 @@ export type Sprint = {
   end_date: string;
   status: "planned" | "active" | "done";
 };
-export type Skill = { id: string; name: string; description: string; content: string };
+export type Skill = { id: string; name: string; description: string; content: string; category: string };
 export type McpServer = {
   id: string;
   name: string;
