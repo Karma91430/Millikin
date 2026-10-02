@@ -39,7 +39,7 @@ export async function extractText(name: string, bytes: Uint8Array): Promise<stri
 
 /** Tags are stored lower-case and trimmed, so filters match regardless of how they were typed. */
 export const normTags = (tags: unknown): string[] =>
-  [...new Set((Array.isArray(tags) ? tags : typeof tags === "string" ? tags.split(",") : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))].slice(0, 12);
+  [...new Set((Array.isArray(tags) ? tags : typeof tags === "string" ? tags.split(",") : []).map((t) => String(t).trim().toLowerCase().replace(/^#+/, "").replace(/\s+/g, "-")).filter(Boolean))].slice(0, 12);
 
 export async function addDocument(kbId: string, name: string, text: string, tags: string[] = []) {
   const chunks = chunkText(text);
@@ -65,6 +65,8 @@ export async function addDocument(kbId: string, name: string, text: string, tags
     d.exec("ROLLBACK");
     throw e;
   }
+  // No tags given: the local model tags the document, reusing the base's themes and vocabulary.
+  if (!normTags(tags).length) await autoTag(docId).catch(() => {});
   return { id: docId, name, chunks: chunks.length, chars: text.length };
 }
 
@@ -314,22 +316,27 @@ export async function search(kbIds: string[], query: string, k = 4, opts: Search
 }
 
 /** Documents as graph nodes plus similarity links (mean chunk embeddings, top 2 neighbours above a threshold). */
-export function knowledgeGraph(kbIds?: string[]) {
-  const docs = listDocuments(kbIds).slice(0, 400);
-  const kbs = new Map(list<{ id: string; name: string }>("kbs").map((k) => [k.id, k.name]));
+/** Sum of each document's passage embeddings (cosine ignores the scale). */
+function docCentroids(docs: { id: string }[]) {
   const centroids = new Map<string, Float32Array>();
   const stmt = db().prepare("SELECT embedding FROM kb_chunks WHERE doc_id = ?");
   for (const d of docs) {
     const rows = stmt.all(d.id) as { embedding: Uint8Array }[];
     if (!rows.length) continue;
-    const first = vec(rows[0].embedding);
-    const sum = new Float32Array(first.length);
+    const sum = new Float32Array(vec(rows[0].embedding).length);
     for (const r of rows) {
       const v = vec(r.embedding);
       for (let i = 0; i < sum.length; i++) sum[i] += v[i];
     }
     centroids.set(d.id, sum);
   }
+  return centroids;
+}
+
+export function knowledgeGraph(kbIds?: string[]) {
+  const docs = listDocuments(kbIds).slice(0, 400);
+  const kbs = new Map(list<{ id: string; name: string }>("kbs").map((k) => [k.id, k.name]));
+  const centroids = docCentroids(docs);
   const links: { source: string; target: string; score: number }[] = [];
   const seen = new Set<string>();
   for (const a of docs) {
@@ -355,28 +362,172 @@ export function knowledgeGraph(kbIds?: string[]) {
   };
 }
 
-/** Ask the default model for 1–3 tags, reusing the existing vocabulary when it fits. */
-export async function suggestTags(docId: string): Promise<string[]> {
-  const doc = db().prepare("SELECT name FROM kb_docs WHERE id = ?").get(docId) as { name: string } | undefined;
+const docSample = (docId: string, max: number) =>
+  (db().prepare("SELECT text FROM kb_chunks WHERE doc_id = ? ORDER BY idx LIMIT 3").all(docId) as { text: string }[])
+    .map((r) => r.text)
+    .join("\n\n")
+    .slice(0, max);
+const parseJson = <T>(raw: string): T | null => {
+  try {
+    return JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as T;
+  } catch {
+    return null;
+  }
+};
+/** Main themes in use: the first tag of each document (it defines the graph constellation). */
+const themesInUse = (kbIds?: string[]) => [...new Set(listDocuments(kbIds).map((d) => d.tags[0]).filter(Boolean))];
+
+/**
+ * Tag a document with the local default model: one main theme (picked from `themes` when given,
+ * else from the themes in use) followed by 1–3 specific tags (technologies, notions), reusing the
+ * existing vocabulary. Returns the tags without saving them.
+ */
+export async function suggestTags(docId: string, opts: { themes?: string[]; theme?: string } = {}): Promise<string[]> {
+  const doc = db().prepare("SELECT name, kb_id FROM kb_docs WHERE id = ?").get(docId) as { name: string; kb_id: string } | undefined;
   if (!doc) throw new Error("Document introuvable");
-  const sample = (db().prepare("SELECT text FROM kb_chunks WHERE doc_id = ? ORDER BY idx LIMIT 3").all(docId) as { text: string }[]).map((r) => r.text).join("\n\n").slice(0, 2500);
-  const vocabulary = tagCounts().map((t) => t.tag);
+  if (opts.theme) return [opts.theme, ...(await specificTags(doc.name, docId, [opts.theme]))].slice(0, 4);
+  // Given themes are a closed list; otherwise the themes in use, plus "autre" for a new one.
+  const strict = !!opts.themes?.length;
+  const known = strict ? opts.themes! : themesInUse([doc.kb_id]);
+  const vocabulary = tagCounts()
+    .map((t) => t.tag)
+    .filter((t) => !known.includes(t))
+    .slice(0, 60);
   const raw = await complete({
-    json: true,
-    temperature: 0.2,
+    temperature: 0.1,
     source: "tags",
+    schema: {
+      type: "object",
+      properties: {
+        theme: known.length ? { type: "string", enum: strict ? known : [...known, "autre"] } : { type: "string" },
+        ...(strict || !known.length ? {} : { nouveau_theme: { type: "string" } }),
+        tags: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 3 },
+      },
+      required: ["theme", "tags"],
+    },
     messages: [
       {
         role: "system",
-        content: `Tu classes des documents par thématique. Réponds UNIQUEMENT en JSON : {"tags": ["tag1", "tag2"]}. 1 à 3 tags courts (un ou deux mots, en minuscules).${
-          vocabulary.length ? ` Réutilise de préférence ces tags existants quand ils conviennent : ${vocabulary.join(", ")}.` : ""
-        }`,
+        content: `Tu classes des documents dans une base de connaissances. Réponds UNIQUEMENT en JSON : {"theme": "…", "tags": ["…"]}.
+- "theme" : LE thème principal du document.${known.length ? ` Choisis-le parmi : ${known.join(", ")}.${strict ? "" : ` Réponds "autre" seulement si aucun ne convient, et propose alors "nouveau_theme" (un domaine en français, un ou deux mots en minuscules reliés par un tiret).`}` : " Un domaine général en français (pas une technologie), un ou deux mots en minuscules reliés par un tiret."}
+- "tags" : 1 à 3 tags plus précis (technologies, notions clés), en minuscules, différents du thème.${vocabulary.length ? ` Réutilise ces tags existants quand ils conviennent : ${vocabulary.join(", ")}.` : ""}
+Pas de synonymes ni de variantes d'un tag existant (pas de pluriel, pas de traduction).`,
       },
-      { role: "user", content: `Document « ${doc.name} » :\n${sample}` },
+      { role: "user", content: `Document « ${doc.name} » :\n${docSample(docId, 2500)}` },
     ],
   });
-  const m = raw.match(/\{[\s\S]*\}/);
-  const tags = m ? normTags((JSON.parse(m[0]) as { tags?: unknown }).tags).slice(0, 3) : [];
+  const j = parseJson<{ theme?: unknown; nouveau_theme?: unknown; tags?: unknown }>(raw);
+  const theme = j?.theme === "autre" ? j.nouveau_theme : j?.theme;
+  const tags = normTags([theme, ...(Array.isArray(j?.tags) ? j.tags : [])].filter((t) => typeof t === "string" && t !== "autre")).slice(0, 4);
   if (!tags.length) throw new Error("Aucun tag proposé, réessaie");
   return tags;
+}
+
+/** 1–3 specific tags (technologies, notions) for a document whose theme is already known. */
+async function specificTags(name: string, docId: string, exclude: string[]) {
+  const vocabulary = tagCounts()
+    .map((t) => t.tag)
+    .filter((t) => !exclude.includes(t))
+    .slice(0, 60);
+  const raw = await complete({
+    temperature: 0.1,
+    source: "tags",
+    schema: { type: "object", properties: { tags: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 3 } }, required: ["tags"] },
+    messages: [
+      {
+        role: "system",
+        content: `Tu tagues des documents. Réponds UNIQUEMENT en JSON : {"tags": ["…"]}. 1 à 3 tags précis (technologies, notions clés), en minuscules, un ou deux mots reliés par un tiret, différents de : ${exclude.join(", ")}.${
+          vocabulary.length ? ` Réutilise ces tags existants quand ils conviennent : ${vocabulary.join(", ")}.` : ""
+        } Pas de synonymes ni de variantes d'un tag existant.`,
+      },
+      { role: "user", content: `Document « ${name} » :\n${docSample(docId, 2500)}` },
+    ],
+  });
+  return normTags(parseJson<{ tags?: unknown }>(raw)?.tags).filter((t) => !exclude.includes(t));
+}
+
+export async function autoTag(docId: string, opts?: { themes?: string[]; theme?: string }) {
+  return setDocumentTags(docId, await suggestTags(docId, opts));
+}
+
+/** Short description of a document for the model: its title and first lines (headings stripped). */
+const docBrief = (d: { id: string; name: string }, max = 200) => `${d.name} : ${docSample(d.id, 600).replace(/^#+.*$/gm, "").replace(/\s+/g, " ").trim().slice(0, max)}`;
+
+/**
+ * Main themes of these bases with the local model, in two short steps that small models handle
+ * well: propose themes from the documents' briefs, then merge the ones that overlap.
+ */
+export async function proposeThemes(kbIds?: string[]): Promise<string[]> {
+  const docs = listDocuments(kbIds);
+  if (!docs.length) return [];
+  const max = Math.max(3, Math.min(10, Math.round(Math.sqrt(docs.length) * 1.3)));
+  const listSchema = (n: number) => ({ type: "object", properties: { themes: { type: "array", items: { type: "string" }, minItems: Math.min(2, n), maxItems: n } }, required: ["themes"] });
+  const raw = await complete({
+    temperature: 0.1,
+    source: "tags",
+    schema: listSchema(max),
+    messages: [
+      {
+        role: "system",
+        content: `Tu organises une base de connaissances. Réponds UNIQUEMENT en JSON : {"themes": ["…"]}.
+Propose au plus ${max} thèmes principaux couvrant tous les documents : des domaines en français (un ou deux mots en minuscules reliés par un tiret, ex : data-science, jeux-video), pas des technologies. Chaque document doit entrer dans exactement un thème, et chaque thème regrouper si possible plusieurs documents.`,
+      },
+      { role: "user", content: docs.map((d) => `- ${docBrief(d)}`).join("\n") },
+    ],
+  });
+  const proposed = normTags(parseJson<{ themes?: unknown }>(raw)?.themes);
+  if (proposed.length < 3) return proposed;
+  // Merge pass: map each theme to the one it should be merged into (itself if it stays).
+  const merged = await complete({
+    temperature: 0,
+    source: "tags",
+    schema: {
+      type: "object",
+      properties: { fusion: { type: "array", items: { type: "object", properties: { theme: { type: "string", enum: proposed }, garder: { type: "string", enum: proposed } }, required: ["theme", "garder"] } } },
+      required: ["fusion"],
+    },
+    messages: [
+      {
+        role: "system",
+        content: `Tu nettoies une liste de thèmes. Réponds UNIQUEMENT en JSON : {"fusion": [{"theme": "…", "garder": "…"}]}, une entrée par thème de la liste.
+"garder" = le thème à conserver : le thème lui-même s'il est distinct des autres, ou un autre thème de la liste s'ils se recoupent (synonymes, l'un inclus dans l'autre, même domaine). Exemples de recoupements : data-science, analyse-de-donnees et apprentissage-machine ; jeux-video et simulation-et-jeux.`,
+      },
+      { role: "user", content: proposed.join(", ") },
+    ],
+  });
+  const map = new Map<string, string>();
+  for (const f of parseJson<{ fusion?: { theme?: string; garder?: string }[] }>(merged)?.fusion ?? []) if (f.theme && f.garder) map.set(f.theme, f.garder);
+  // Follow chains (a → b → c) and keep only themes that map to themselves.
+  const final = (t: string, seen = new Set<string>()): string => {
+    const n = map.get(t) ?? t;
+    return n === t || seen.has(n) ? t : (seen.add(t), final(n, seen));
+  };
+  return [...new Set(proposed.map((t) => final(t)))];
+}
+
+/** Retag every document of these bases: themes first, then each document within them (empty themes are dropped). */
+export async function retagAll(kbIds: string[] | undefined, onProgress: (ev: { themes?: string[]; doc?: string; tags?: string[]; error?: string; done?: number; total?: number }) => void, signal?: AbortSignal) {
+  const docs = listDocuments(kbIds);
+  const themes = await proposeThemes(kbIds);
+  onProgress({ themes, total: docs.length });
+  for (const [i, d] of docs.entries()) {
+    if (signal?.aborted) break;
+    try {
+      onProgress({ doc: d.name, tags: await autoTag(d.id, themes.length ? { themes } : {}), done: i + 1, total: docs.length });
+    } catch (e) {
+      onProgress({ doc: d.name, error: e instanceof Error ? e.message : String(e), done: i + 1, total: docs.length });
+    }
+  }
+  // Themes holding a single document (on a base of some size) are folded into the others.
+  const count = new Map<string, number>();
+  for (const d of listDocuments(kbIds)) count.set(d.tags[0], (count.get(d.tags[0]) ?? 0) + 1);
+  const kept = themes.filter((t) => (count.get(t) ?? 0) >= (docs.length >= 10 ? 2 : 1));
+  if (kept.length >= 2 && kept.length < themes.length)
+    for (const d of listDocuments(kbIds).filter((x) => !kept.includes(x.tags[0]))) {
+      if (signal?.aborted) break;
+      try {
+        onProgress({ doc: d.name, tags: await autoTag(d.id, { themes: kept }) });
+      } catch {}
+    }
+  onProgress({ themes: kept.length >= 2 ? kept : themes, done: docs.length, total: docs.length });
 }

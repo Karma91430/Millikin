@@ -129,6 +129,8 @@ export async function chatStream(opts: {
   projectId?: string | null;
   source?: string;
   json?: boolean;
+  /** JSON schema the answer must follow (Ollama structured outputs); implies JSON. */
+  schema?: Record<string, unknown>;
   onText?: (t: string) => void;
   onReasoning?: (t: string) => void;
 }): Promise<StreamResult> {
@@ -147,7 +149,8 @@ export async function chatStream(opts: {
     keep_alive: s.keep_alive || "10m",
   };
   if (opts.tools?.length && (caps.length ? caps.includes("tools") : res.row?.supports_tools !== false)) body.tools = opts.tools;
-  if (opts.json) body.format = "json";
+  if (opts.schema) body.format = opts.schema;
+  else if (opts.json) body.format = "json";
   // Only send `think` to models that support it; Ollama rejects it otherwise.
   if (caps.includes("thinking")) {
     const mode = opts.think || (s.think === "on" ? "on" : "off");
@@ -251,7 +254,7 @@ export async function chatStream(opts: {
 }
 
 /** Non-streaming helper for JSON generation (thinking off: faster, and cleaner JSON). */
-export async function complete(opts: { ref?: string | null; messages: ChatMessage[]; json?: boolean; source?: string; temperature?: number }) {
+export async function complete(opts: { ref?: string | null; messages: ChatMessage[]; json?: boolean; schema?: Record<string, unknown>; source?: string; temperature?: number }) {
   const r = await chatStream({ ...opts, think: "off", source: opts.source ?? "generator" });
   return r.content;
 }
