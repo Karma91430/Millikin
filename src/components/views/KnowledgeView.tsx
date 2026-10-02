@@ -70,6 +70,86 @@ export function KnowledgeView() {
   );
 }
 
+type RetagEvent = { themes?: string[]; doc?: string; tags?: string[]; error?: string; done?: number; total?: number };
+
+/** Retag a whole base with the local model, showing the themes and each document as it is done. */
+function Retag({ kbIds, count, onDone }: { kbIds: string[]; count: number; onDone: () => void }) {
+  const [log, setLog] = useState<RetagEvent[] | null>(null);
+  const [running, setRunning] = useState(false);
+  const themes = log?.findLast((e) => e.themes)?.themes;
+  const last = log?.findLast((e) => e.total);
+  async function run() {
+    if (!confirm("Le modèle local va proposer des thèmes puis retaguer chaque document de la base (les tags actuels seront remplacés). Continuer ?")) return;
+    setRunning(true);
+    setLog([]);
+    try {
+      const res = await fetch("/api/kb/tags", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ retag: true, kbIds }) });
+      const reader = res.body!.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        const evs = lines.filter(Boolean).map((l) => JSON.parse(l) as RetagEvent);
+        if (evs.length) setLog((cur) => [...(cur ?? []), ...evs]);
+      }
+    } finally {
+      setRunning(false);
+      onDone();
+    }
+  }
+  return (
+    <>
+      <Button size="sm" onClick={run} disabled={running || !count} title="Le modèle local définit les thèmes de la base puis retague chaque document">
+        <Sparkles size={13} /> {running ? `Tags… ${last?.done ?? 0}/${last?.total ?? count}` : "Retaguer avec le modèle local"}
+      </Button>
+      {log && (
+        <Modal open onClose={() => !running && setLog(null)} title="Retag par le modèle local">
+          <div className="flex flex-col gap-3 text-sm">
+            {!themes && <p className="text-fg-muted">Le modèle lit les documents et propose les thèmes principaux…</p>}
+            {themes && (
+              <div>
+                <div className="mb-1 text-xs text-fg-muted">Thèmes retenus (un par document, ils forment les constellations du graphe)</div>
+                <div className="flex flex-wrap gap-1">
+                  {themes.map((t) => (
+                    <span key={t} className="rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: tagColor(t) }}>
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="max-h-80 overflow-y-auto rounded-lg border border-line">
+              {log
+                .filter((e) => e.doc)
+                .map((e, i) => (
+                  <div key={i} className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs last:border-0">
+                    <span className="min-w-0 flex-1 truncate">{e.doc}</span>
+                    {e.error ? (
+                      <span className="text-red-400">{e.error}</span>
+                    ) : (
+                      <span className="flex flex-wrap justify-end gap-1">
+                        {e.tags?.map((t, k) => (
+                          <span key={t} className={cx("rounded-full px-1.5 text-[10px]", k === 0 ? "text-white" : "text-fg-muted")} style={k === 0 ? { background: tagColor(t) } : undefined}>
+                            #{t}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                ))}
+            </div>
+            <div className="text-xs text-fg-subtle">{running ? `En cours : ${last?.done ?? 0}/${last?.total ?? count} documents` : "Terminé."}</div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 /** Editable tag chips with an AI suggestion button. */
 function TagEditor({ docId, tags, onChange }: { docId: string; tags: string[]; onChange: (t: string[]) => void }) {
   const [draft, setDraft] = useState("");
@@ -171,22 +251,25 @@ function KbDetail({ kb, onDeleted }: { kb: Kb; onDeleted: () => void }) {
           <div className="text-base font-semibold">{kb.name}</div>
           <div className="text-sm text-fg-muted">{kb.description}</div>
         </div>
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={async () => {
-            if (!confirm(`Supprimer la base « ${kb.name} » et tous ses documents ?`)) return;
-            await crud.remove("kbs", kb.id);
-            onDeleted();
-          }}
-        >
-          <Trash2 size={13} /> Supprimer la base
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <Retag kbIds={[kb.id]} count={docs.data?.length ?? 0} onDone={docs.reload} />
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={async () => {
+              if (!confirm(`Supprimer la base « ${kb.name} » et tous ses documents ?`)) return;
+              await crud.remove("kbs", kb.id);
+              onDeleted();
+            }}
+          >
+            <Trash2 size={13} /> Supprimer la base
+          </Button>
+        </div>
       </div>
       <ErrorNote>{error && <pre className="whitespace-pre-wrap font-sans">{error}</pre>}</ErrorNote>
 
       <Card className="flex flex-col gap-3 p-3">
-        <Field label="Tags appliqués aux prochains imports (séparés par des virgules)">
+        <Field label="Tags appliqués aux prochains imports (séparés par des virgules)" hint="Laisse vide pour que le modèle local tague chaque document : un thème principal puis des tags précis.">
           <Input value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} placeholder="ex : commander, règles" />
         </Field>
         <div
