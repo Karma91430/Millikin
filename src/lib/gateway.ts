@@ -114,6 +114,25 @@ function toNative(messages: ChatMessage[]) {
 }
 
 export type StreamResult = { content: string; reasoning: string; toolCalls: ToolCall[]; usage: Usage };
+
+/**
+ * Small local models sometimes write a tool call as text (`<tool_call>{"name": …, "arguments": …}</tool_call>`)
+ * instead of using the structured channel. Turn those blocks into real calls (known tools only) and drop them from the text.
+ */
+export function extractTextToolCalls(content: string, toolNames: string[]): { calls: ToolCall[]; rest: string } {
+  const calls: ToolCall[] = [];
+  const rest = content.replace(/<tool_call>\s*(\{[\s\S]*?\})\s*(?:<\/tool_call>|$)/g, (block, json: string) => {
+    try {
+      const j = JSON.parse(json) as { name?: string; arguments?: unknown };
+      if (!j.name || !toolNames.includes(j.name)) return block;
+      calls.push({ id: `call_${newId()}`, type: "function", function: { name: j.name, arguments: typeof j.arguments === "string" ? j.arguments : JSON.stringify(j.arguments ?? {}) } });
+      return "";
+    } catch {
+      return block;
+    }
+  });
+  return { calls, rest: rest.trim() };
+}
 export type Think = "" | "on" | "off";
 
 /** Streaming chat with tool calls, thinking split and usage logging. */
@@ -239,6 +258,10 @@ export async function chatStream(opts: {
     emit(pending);
     logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", ...usage, latency_ms: Date.now() - started, status: "ok" });
     opts.signal?.removeEventListener("abort", onOuterAbort);
+    if (!toolCalls.length && opts.tools?.length && content.includes("<tool_call>")) {
+      const { calls, rest } = extractTextToolCalls(content, opts.tools.map((t) => t.function.name));
+      if (calls.length) return { content: rest, reasoning, toolCalls: calls, usage };
+    }
     return { content, reasoning, toolCalls, usage };
   } catch (e) {
     if (overthinking && !opts.signal?.aborted) {

@@ -1,4 +1,6 @@
 export const models: Record<string, string> = {
+  "Relances automatiques d'une tâche": "Automatic task retries",
+  "Une tâche rejetée par le contrôle ou en échec est relancée avec le retour, jusqu'à ce nombre de fois, avant de demander une vérification humaine. 0 = désactivé.": "A task rejected by the review or that failed is relaunched with the feedback, up to this many times, before asking for a human check. 0 = off.",
   "Pour les agents, privilégie les modèles avec le badge « tools ».": "For agents, prefer models with the “tools” badge.",
   "Les modèles « embedding » servent au RAG (réglable dans Réglages).": "“Embedding” models are used for RAG (configurable in Settings).",
   "Modèles": "Models",

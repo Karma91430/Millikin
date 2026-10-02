@@ -85,6 +85,9 @@ function SettingsForm({ meta, initial }: { meta: Meta; initial: Record<string, s
           <Field label={t("Étapes max par agent")} hint={t("Nombre maximal d'allers-retours outil → modèle par tour.")}>
             <Input type="number" min={1} max={30} value={v.max_steps} onChange={(e) => set("max_steps", e.target.value)} />
           </Field>
+          <Field label={t("Relances automatiques d'une tâche")} hint={t("Une tâche rejetée par le contrôle ou en échec est relancée avec le retour, jusqu'à ce nombre de fois, avant de demander une vérification humaine. 0 = désactivé.")}>
+            <Input type="number" min={0} max={10} value={v.task_auto_retries} onChange={(e) => set("task_auto_retries", e.target.value)} />
+          </Field>
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">

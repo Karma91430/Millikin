@@ -81,6 +81,8 @@ export type RunParams = {
   parentCallId?: string | null;
   viaToolCallId?: string;
   depth?: number;
+  /** Raise model errors instead of returning them as text (task runs retry on errors). */
+  throwErrors?: boolean;
   /** Agent ids from the root down to the caller: never delegate back up the chain. */
   chain?: string[];
   /** Extra system sections (e.g. co-leads' opinions). */
@@ -363,7 +365,9 @@ export async function runAgent(p: RunParams): Promise<string> {
           emit({ type: "text", callId, text: "\n\n" });
           continue;
         }
-        const content = (carried + res.content).trim() || "(pas de réponse)";
+        // A final answer that is only a tool call written as text is not an answer: drop the raw block.
+        const text = res.content.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g, "").trim();
+        const content = (carried + text).trim() || "(pas de réponse : l'agent s'est arrêté sans conclure)";
         emit({ type: "agent_end", callId, content });
         return content;
       }
@@ -397,7 +401,8 @@ export async function runAgent(p: RunParams): Promise<string> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     emit({ type: "error", callId, message });
-    if (depth > 0 && !signal?.aborted) return `Erreur chez ${agent.name} : ${message}`;
+    // In a delegation the calling agent gets the error as text and can react; task runs want the real error.
+    if (depth > 0 && !p.throwErrors && !signal?.aborted) return `Erreur chez ${agent.name} : ${message}`;
     throw e;
   }
 }

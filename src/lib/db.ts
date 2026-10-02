@@ -89,6 +89,8 @@ const COLUMNS: [string, string, string][] = [
   ["projects", "resources", "TEXT DEFAULT '{}'"],
   ["conversations", "kind", "TEXT DEFAULT ''"],
   ["skills", "category", "TEXT DEFAULT ''"],
+  ["tasks", "attempts", "INTEGER DEFAULT 0"],
+  ["tasks", "needs_human", "INTEGER DEFAULT 0"],
   ["agents", "rag", "TEXT DEFAULT '{}'"],
 ];
 
@@ -185,6 +187,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   web_fallback: "on",
   /** Interface and agents' answer language: fr | en. */
   language: "fr",
+  /** Automatic relaunches of a rejected or failed task before asking a person (0 = off). */
+  task_auto_retries: "5",
 };
 
 export function getSettings(): Record<string, string> {
@@ -221,8 +225,8 @@ export const ENTITIES: Record<string, EntityDef> = {
   tasks: {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
-    bool: [],
-    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id"],
+    bool: ["needs_human"],
+    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id", "attempts", "needs_human"],
     order: "created_at",
   },
   sprints: { table: "sprints", json: [], bool: [], cols: ["project_id", "name", "goal", "start_date", "end_date", "status"], order: "created_at" },
@@ -358,6 +362,10 @@ export type Task = {
   /** Story points (1, 2, 3, 5, 8, 13); 0 = not estimated. */
   complexity: number;
   sprint_id: string;
+  /** Automatic relaunches done since the last launch by a person. */
+  attempts: number;
+  /** The automatic relaunches are exhausted: a person has to look at it. */
+  needs_human: boolean;
   title: string;
   description: string;
   status: "todo" | "retry" | "doing" | "review" | "done";
