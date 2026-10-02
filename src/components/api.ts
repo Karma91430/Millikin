@@ -74,6 +74,8 @@ export type Task = {
   depends_on: string[];
   complexity: number;
   sprint_id: string;
+  attempts: number;
+  needs_human: boolean;
   title: string;
   description: string;
   status: "todo" | "retry" | "doing" | "review" | "done";

@@ -639,7 +639,6 @@ function Board({
   const [drag, setDrag] = useState<string | null>(null);
   const [local, setLocal] = useState<Record<string, Task["status"]>>({});
   const [error, setError] = useState<string>();
-  const [retry, setRetry] = useState(true);
   const [planOpen, setPlanOpen] = useState(false);
   const [sprintEdit, setSprintEdit] = useState<Partial<Sprint> | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
@@ -669,7 +668,7 @@ function Board({
   const launchChain = async () => {
     setError(undefined);
     try {
-      await api("/api/tasks/chain", { method: "POST", json: { projectId: project.id, retry, sprintId: currentSprint?.id } });
+      await api("/api/tasks/chain", { method: "POST", json: { projectId: project.id, sprintId: currentSprint?.id } });
       onRunsChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -732,10 +731,6 @@ function Board({
             <Button size="sm" variant="soft" onClick={launchChain} title={tr("Exécute les tâches ouvertes (du sprint affiché) dans l'ordre des dépendances")}>
               <Link2 size={13} /> {currentSprint ? tr("Lancer le {name}", { name: currentSprint.name }) : tr("Lancer la chaîne")}
             </Button>
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted" title={tr("Si le contrôle renvoie « à corriger », la tâche est relancée une fois avec le retour avant d'arrêter la chaîne")}>
-              <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} className="accent-[var(--accent)]" />
-              {tr("relancer une fois si « à corriger »")}
-            </label>
           </>
         )}
         <span className="text-xs text-fg-subtle">{tr("▶ lance une tâche · 🔒 bloquée tant que ses dépendances ne sont pas terminées")}</span>
@@ -778,7 +773,9 @@ function Board({
                   const who = byId.get(t.assignee_id);
                   const isRunning = running.has(t.id);
                   const blockedBy = blockers(t);
-                  const phaseLabel = isRunning ? (t.status === "review" ? tr("contrôle en cours…") : tr("{name} travaille…", { name: who?.name ?? tr("l'agent") })) : null;
+                  const phaseLabel = isRunning
+                    ? `${t.status === "review" ? tr("contrôle en cours…") : tr("{name} travaille…", { name: who?.name ?? tr("l'agent") })}${t.attempts ? ` · ${tr("relance {n}", { n: t.attempts })}` : ""}`
+                    : null;
                   return (
                     <div
                       key={t.id}
@@ -832,6 +829,11 @@ function Board({
                       <div className="mt-2 flex items-center gap-1.5">
                         {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
                         {t.evaluation && <EvalBadge e={t.evaluation} />}
+                        {t.needs_human && !isRunning && (
+                          <span title={tr("Les relances automatiques n'ont pas suffi : relis le retour du contrôle, ajuste la consigne si besoin, puis relance.")}>
+                            <Badge color="#f59e0b">{tr("🧑 vérification humaine")}</Badge>
+                          </span>
+                        )}
                         {t.complexity > 0 && <Badge>{tr("{n} pts", { n: t.complexity })}</Badge>}
                         {t.priority !== "normal" && <Badge color={PRIORITY[t.priority].color}>{tr(PRIORITY[t.priority].label)}</Badge>}
                         {t.notes?.length > 0 && <Badge>{t.notes.length} 💬</Badge>}

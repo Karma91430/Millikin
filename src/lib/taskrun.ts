@@ -2,7 +2,7 @@
 // Tasks can depend on others: dependencies' results and the project's decision log are passed along,
 // and a chain run executes a whole set of tasks in dependency order.
 import { appendDecision } from "./decisions";
-import { get, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
+import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import { workspaceFor } from "./tools";
@@ -78,32 +78,48 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
         projectId: project.id,
         team: team.spec.agent_ids.map((id) => team.agents.get(id)!).filter(Boolean),
       };
-      let t = upsert<Task>("tasks", { id: task.id, status: "doing", notes: note(task, "Millikin", `▶ Lancée : ${assignee.name} s'en occupe.`) });
+      // A launch by a person resets the automatic relaunch counter.
+      let t = upsert<Task>("tasks", { id: task.id, status: "doing", attempts: 0, needs_human: false, notes: note(task, "Millikin", `▶ Lancée : ${assignee.name} s'en occupe.`) });
+      const maxRetries = Math.max(0, Math.min(10, Number(getSettings().task_auto_retries) || 0));
+      let lastError = "";
 
-      const previous = t.evaluation?.verdict === "a_corriger" ? `\n\n## Retour du dernier contrôle à prendre en compte\n${t.evaluation.comment}` : "";
-      const input = `Tâche du projet « ${project.name} » (#${t.id}) : ${t.title}\n\n${t.description || "(pas de description)"}${dependencyContext(t, projectTasks(project.id))}${previous}
+      // Loop: work → review; a rejected or failed attempt is relaunched with the feedback, up to maxRetries times.
+      for (let attempt = 0; ; attempt++) {
+        if (attempt > 0) {
+          t = upsert<Task>("tasks", { id: t.id, status: "doing", attempts: attempt, notes: note(t, "Millikin", `↻ Relance automatique ${attempt}/${maxRetries}`) });
+        }
+        const previous =
+          t.evaluation?.verdict === "a_corriger"
+            ? `\n\n## Retour du dernier contrôle à prendre en compte\n${t.evaluation.comment}`
+            : lastError
+              ? `\n\n## La tentative précédente a échoué\n${lastError}\nCorrige la cause avant de recommencer.`
+              : "";
+        const input = `Tâche du projet « ${project.name} » (#${t.id}) : ${t.title}\n\n${t.description || "(pas de description)"}${dependencyContext(t, projectTasks(project.id))}${previous}
 
 Réalise cette tâche maintenant. Si elle implique du code ou des documents, écris réellement les fichiers dans le dossier du projet.
 Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifiés (chemins), et les points d'attention.`;
 
-      try {
-        // The board is driven by the task run itself: the assignee must not add or move cards.
-        const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, emit, signal, ctx, excludeTools: BOARD_WRITE });
-        t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
+        try {
+          lastError = "";
+          // The board is driven by the task run itself: the assignee must not add or move cards.
+          const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, throwErrors: true, emit, signal, ctx, excludeTools: BOARD_WRITE });
+          t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
-        if (reviewer) {
-          const review = await runAgent({
-            agent: reviewer,
-            depth: 1,
-            consultOnly: true,
-            // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
-            excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
-            phase: "execution",
-            team,
-            emit,
-            signal,
-            ctx,
-            input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
+          // Without a reviewer the task stays "En revue" for a person to check.
+          if (reviewer) {
+            const review = await runAgent({
+              agent: reviewer,
+              depth: 1,
+              throwErrors: true,
+              consultOnly: true,
+              // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
+              excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
+              phase: "execution",
+              team,
+              emit,
+              signal,
+              ctx,
+              input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
 
 Consigne de la tâche :
 ${t.description || t.title}
@@ -114,26 +130,41 @@ ${result}
 Vérifie le travail (lis les fichiers du projet si tu en as l'outil) : conformité à la consigne, cohérence avec les tâches dont elle dépend et avec les décisions du projet, qualité, oublis.
 Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
 {"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
-          });
-          const evaluation = parseEvaluation(review, reviewer.name);
-          t = upsert<Task>("tasks", {
-            id: t.id,
-            evaluation,
-            status: evaluation.verdict === "valide" ? "done" : "retry",
-            notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
-          });
-          await appendDecision(
-            ctx.workspace,
-            `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
-            `Réalisée par ${assignee.name}. ${evaluation.comment}`,
-            reviewer.name,
-          ).catch(() => {});
+            });
+            const evaluation = parseEvaluation(review, reviewer.name);
+            t = upsert<Task>("tasks", {
+              id: t.id,
+              evaluation,
+              status: evaluation.verdict === "valide" ? "done" : "retry",
+              notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
+            });
+            await appendDecision(
+              ctx.workspace,
+              `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
+              `Réalisée par ${assignee.name}. ${evaluation.comment}`,
+              reviewer.name,
+            ).catch(() => {});
+          }
+        } catch (e) {
+          const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);
+          // A failure goes to "À relancer"; a manual stop simply returns to the backlog.
+          t = upsert<Task>("tasks", { id: t.id, status: signal.aborted ? "todo" : "retry", notes: note(t, "Millikin", `⚠️ ${message}`) });
+          emit({ type: "error", message });
+          lastError = message;
         }
-      } catch (e) {
-        const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);
-        // A failure goes to "À relancer"; a manual stop simply returns to the backlog.
-        t = upsert<Task>("tasks", { id: t.id, status: signal.aborted ? "todo" : "retry", notes: note(t, "Millikin", `⚠️ ${message}`) });
-        emit({ type: "error", message });
+
+        if (t.status !== "retry" || signal.aborted) break;
+        if (attempt >= maxRetries) {
+          if (maxRetries > 0)
+            t = upsert<Task>("tasks", {
+              id: t.id,
+              needs_human: true,
+              notes: note(t, "Millikin", `🧑 ${maxRetries} relances automatiques sans validation : une vérification humaine est nécessaire.`),
+            });
+          break;
+        }
+        // Give a failing service (model unloaded, network) a moment before the next attempt.
+        if (lastError) await new Promise((r) => setTimeout(r, 5000));
       }
       upsert("tasks", { id: t.id, trace: run.trace });
       emit({ type: "done", messageId: "" });
@@ -164,7 +195,7 @@ export const chainKey = (projectId: string) => `chain:${projectId}`;
  * Run every open task of a project in dependency order. Independent tasks run side by side
  * (up to `parallel`); each task is its own run, so the board and live views work as usual.
  */
-export function startChainRun(projectId: string, opts: { retry: boolean; parallel?: number; sprintId?: string }): Run {
+export function startChainRun(projectId: string, opts: { parallel?: number; sprintId?: string } = {}): Run {
   const project = get<Project>("projects", projectId);
   if (!project) throw new Error("Projet introuvable");
   if (activeRunFor(chainKey(projectId))) throw new Error("Une chaîne est déjà en cours sur ce projet");
@@ -180,7 +211,6 @@ export function startChainRun(projectId: string, opts: { retry: boolean; paralle
     async (emit, signal) => {
       const pending = new Set(order.map((t) => t.id));
       const running = new Map<string, Promise<void>>();
-      const retried = new Set<string>();
       let failed: string | null = null;
       signal.addEventListener("abort", () => {
         for (const id of running.keys()) {
@@ -195,12 +225,8 @@ export function startChainRun(projectId: string, opts: { retry: boolean; paralle
           running.delete(id);
           const t = get<Task>("tasks", id)!;
           if (t.status === "done") return;
-          if (opts.retry && !retried.has(id) && !signal.aborted && t.evaluation?.verdict === "a_corriger") {
-            retried.add(id);
-            pending.add(id); // one more attempt with the reviewer's feedback
-            return;
-          }
-          failed ??= `« ${t.title} » n'a pas été validée${t.evaluation ? ` : ${t.evaluation.comment.slice(0, 200)}` : ""}`;
+          // The task run already relaunched it automatically; past that, a person has to look.
+          failed ??= `« ${t.title} » n'a pas été validée${t.needs_human ? " après les relances automatiques" : ""}${t.evaluation ? ` : ${t.evaluation.comment.slice(0, 200)}` : ""}`;
         });
         running.set(id, p);
       };
