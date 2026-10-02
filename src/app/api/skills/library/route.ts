@@ -1,27 +1,40 @@
 import { list, upsert, type Agent, type Skill } from "@/lib/db";
 import { SKILL_LIBRARY } from "@/lib/skillLibrary";
 
-/** The built-in skills, with whether each one is already installed (matched by name). */
+const key = (name: string) => name.trim().toLowerCase();
+
+/** The built-in skills, with their install state (matched by name) and whether the library has a newer text. */
 export async function GET() {
-  const installed = new Set(list<Skill>("skills").map((s) => s.name.toLowerCase()));
-  return Response.json(SKILL_LIBRARY.map((s) => ({ ...s, installed: installed.has(s.name.toLowerCase()) })));
+  const installed = new Map(list<Skill>("skills").map((s) => [key(s.name), s]));
+  return Response.json(
+    SKILL_LIBRARY.map((s) => {
+      const mine = installed.get(key(s.name));
+      return { ...s, installed: !!mine, id: mine?.id, outdated: !!mine && (mine.content !== s.content || mine.description !== s.description || mine.category !== s.category) };
+    }),
+  );
 }
 
 /**
- * Install library skills (all, or `names`). Already installed ones are left untouched.
- * `assign`: also give each skill to the agents whose name matches one of its profiles.
+ * Install library skills (all, or `names`); installed ones are left untouched unless listed in `update`,
+ * which replaces their text with the library version. `assign` also gives each skill to the agents
+ * whose name matches one of its recommended profiles.
  */
 export async function POST(req: Request) {
-  const { names, assign } = (await req.json().catch(() => ({}))) as { names?: string[]; assign?: boolean };
-  const wanted = SKILL_LIBRARY.filter((s) => !names?.length || names.includes(s.name));
-  const byName = new Map(list<Skill>("skills").map((s) => [s.name.toLowerCase(), s]));
+  const { names, update, assign } = (await req.json().catch(() => ({}))) as { names?: string[]; update?: string[]; assign?: boolean };
+  const wanted = SKILL_LIBRARY.filter((s) => (!names?.length && !update?.length) || names?.includes(s.name) || update?.includes(s.name));
+  const byName = new Map(list<Skill>("skills").map((s) => [key(s.name), s]));
   let added = 0;
+  let updated = 0;
   const ids = new Map<string, string>();
   for (const s of wanted) {
-    let skill = byName.get(s.name.toLowerCase());
+    let skill = byName.get(key(s.name));
+    const text = { description: s.description, content: s.content, category: s.category };
     if (!skill) {
-      skill = upsert<Skill>("skills", { name: s.name, description: s.description, content: s.content });
+      skill = upsert<Skill>("skills", { name: s.name, ...text });
       added++;
+    } else if (update?.includes(s.name)) {
+      skill = upsert<Skill>("skills", { id: skill.id, ...text });
+      updated++;
     }
     ids.set(s.name, skill.id);
   }
@@ -35,5 +48,5 @@ export async function POST(req: Request) {
         assigned++;
       }
     }
-  return Response.json({ added, assigned, total: wanted.length });
+  return Response.json({ added, updated, assigned, total: wanted.length });
 }
