@@ -1,29 +1,6 @@
 "use client";
 
-import {
-  Check,
-  ChevronRight,
-  Code2,
-  Copy,
-  Eye,
-  File,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  CalendarRange,
-  Link2,
-  ListTree,
-  Loader2,
-  Lock,
-  MessageSquare,
-  Pencil,
-  Play,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Square,
-  Trash2,
-} from "lucide-react";
+import { CalendarRange, Check, ChevronRight, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
@@ -32,7 +9,7 @@ import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo
 import { CallFocus } from "../chat/CallFocus";
 import { ProjectResourcesPanel } from "../ProjectResources";
 import { TeamBuilder } from "../TeamBuilder";
-import { Avatar, Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, Select, Textarea } from "../ui";
+import { Avatar, Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, Select, Textarea, usePersistentFlag } from "../ui";
 import { useRunTrace } from "../useRunTrace";
 
 const COLUMNS: { id: Task["status"]; label: string; color: string }[] = [
@@ -117,48 +94,85 @@ export function ProjectsView({
   }, [tasks.reload]);
 
   const showCreate = creating || !!createFrom;
+  const [listWide, toggleList] = usePersistentFlag("millikin:projects-list-wide", true);
 
   return (
     <div className="flex h-full min-h-0">
-      {/* project sub-menu */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-line">
-        <div className="flex items-center justify-between px-4 pb-2 pt-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
-          <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
+      {/* project sub-menu: full list, or a thin rail of initials when collapsed */}
+      {!listWide ? (
+        <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-line py-3">
+          <Button size="sm" variant="ghost" onClick={toggleList} title={t("Afficher la liste des projets")} aria-label={t("Afficher la liste des projets")}>
+            <PanelLeftOpen size={15} />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")} aria-label={t("Nouveau projet")}>
             <FolderPlus size={15} />
           </Button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
-          {list.map((p) => {
-            const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
-            const done = mine.filter((x) => x.status === "done").length;
-            const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
-            return (
-              <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
-                  {busy && <Loader2 size={13} className="animate-spin text-accent" />}
-                </div>
-                <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
-                  <span>
-                    {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
-                  </span>
-                  {mine.length > 0 && (
-                    <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
-                      <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
-                    </span>
+          <div className="my-1 h-px w-6 bg-line" />
+          <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
+            {list.map((p) => {
+              const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onSelect(p.id)}
+                  title={p.name}
+                  className={cx(
+                    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
+                    p.id === project?.id ? "bg-accent/20 text-fg" : "bg-surface-2 text-fg-muted hover:text-fg",
                   )}
-                </div>
+                >
+                  {p.name.trim().charAt(0).toUpperCase()}
+                  {busy && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-accent" />}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      ) : (
+        <aside className="flex w-64 shrink-0 flex-col border-r border-line">
+          <div className="flex items-center justify-between px-4 pb-2 pt-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
+            <span className="flex">
+              <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
+                <FolderPlus size={15} />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={toggleList} title={t("Masquer la liste des projets")} aria-label={t("Masquer la liste des projets")}>
+                <PanelLeftClose size={15} />
+              </Button>
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-3">
+            {list.map((p) => {
+              const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
+              const done = mine.filter((x) => x.status === "done").length;
+              const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
+              return (
+                <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
+                    {busy && <Loader2 size={13} className="animate-spin text-accent" />}
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
+                    <span>
+                      {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
+                    </span>
+                    {mine.length > 0 && (
+                      <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+                        <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+            {!list.length && projects && (
+              <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
+                {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
               </button>
-            );
-          })}
-          {!list.length && projects && (
-            <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
-              {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
-            </button>
-          )}
-        </div>
-      </aside>
+            )}
+          </div>
+        </aside>
+      )}
 
       {project ? (
         <ProjectDetail

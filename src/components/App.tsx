@@ -1,11 +1,11 @@
 "use client";
 
-import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, MessagesSquare, Plug, Settings, Users, X, XCircle } from "lucide-react";
+import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, Users, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { I18nProvider, LANGS, useT, type Lang } from "@/i18n";
 import { api, useData, type Agent, type Meta, type Project, type RunInfo, type Team } from "./api";
 import { ChatView, type Target } from "./chat/ChatView";
-import { cx } from "./ui";
+import { cx, usePersistentFlag } from "./ui";
 import { AgentsView } from "./views/AgentsView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MachineView } from "./views/MachineView";
@@ -63,6 +63,8 @@ export function App() {
 
 function Workspace() {
   const { t: tr, lang, setLang } = useT();
+  // Wide (icons + labels) on large screens unless the user collapsed it; always icons-only on small screens.
+  const [navWide, toggleNav] = usePersistentFlag("millikin:nav-wide", true);
   // Rendered client-only (see ClientApp), so localStorage is safe in the initializer.
   const [view, setView] = useState<View>(() => {
     try {
@@ -136,10 +138,10 @@ function Workspace() {
 
   return (
     <div className="flex h-screen min-h-0">
-      <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface-1 py-3 xl:w-52 xl:items-stretch xl:px-2">
-        <div className="mb-3 flex items-center gap-2 px-1 xl:px-2">
+      <nav className={cx("flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface-1 py-3 transition-[width]", navWide && "xl:w-52 xl:items-stretch xl:px-2")}>
+        <div className={cx("mb-3 flex items-center gap-2 px-1", navWide && "xl:px-2")}>
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">M</span>
-          <span className="hidden text-sm font-semibold xl:block">Millikin</span>
+          <span className={cx("hidden text-sm font-semibold", navWide && "xl:block")}>Millikin</span>
         </div>
         {NAV.map(({ id, label, icon: Icon }) => (
           <button
@@ -159,11 +161,11 @@ function Workspace() {
                 </span>
               )}
             </span>
-            <span className="hidden xl:block">{tr(label)}</span>
+            <span className={cx("hidden", navWide && "xl:block")}>{tr(label)}</span>
           </button>
         ))}
         {running.length > 0 && (
-          <div className="mt-4 hidden flex-col gap-1 xl:flex">
+          <div className={cx("mt-4 hidden flex-col gap-1", navWide && "xl:flex")}>
             <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("En cours")}</div>
             {running.map((r) => (
               <button key={r.id} onClick={() => openRun(r)} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-fg-muted hover:bg-surface-2" title={r.title}>
@@ -176,9 +178,18 @@ function Workspace() {
             ))}
           </div>
         )}
-        <div className="mt-auto flex flex-col gap-2 px-1 xl:px-2.5">
+        <div className={cx("mt-auto flex flex-col gap-2 px-1", navWide && "xl:px-2.5")}>
+          <button
+            onClick={toggleNav}
+            title={navWide ? tr("Réduire le menu") : tr("Agrandir le menu")}
+            aria-label={navWide ? tr("Réduire le menu") : tr("Agrandir le menu")}
+            className="hidden h-8 items-center gap-2.5 rounded-lg px-2.5 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg xl:flex"
+          >
+            {navWide ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+            {navWide && <span>{tr("Réduire le menu")}</span>}
+          </button>
           <div className="flex items-center gap-0.5 rounded-lg border border-line p-0.5" title={tr("Langue de l'interface et des réponses des agents")}>
-            <Languages size={14} className="mx-1 hidden shrink-0 text-fg-subtle xl:block" />
+            <Languages size={14} className={cx("mx-1 hidden shrink-0 text-fg-subtle", navWide && "xl:block")} />
             {LANGS.map((l) => (
               <button
                 key={l.id}
@@ -191,7 +202,7 @@ function Workspace() {
               </button>
             ))}
           </div>
-          <div className="hidden text-[11px] text-fg-subtle xl:block">{tr("100 % local · Ollama")}</div>
+          <div className={cx("hidden text-[11px] text-fg-subtle", navWide && "xl:block")}>{tr("100 % local · Ollama")}</div>
         </div>
       </nav>
 

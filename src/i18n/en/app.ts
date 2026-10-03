@@ -1,4 +1,6 @@
 export const app: Record<string, string> = {
+  "Réduire le menu": "Collapse menu",
+  "Agrandir le menu": "Expand menu",
   "Espace de travail": "Workspace",
   Projets: "Projects",
   Agents: "Agents",

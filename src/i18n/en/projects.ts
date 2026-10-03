@@ -1,4 +1,6 @@
 export const projects: Record<string, string> = {
+  "Afficher la liste des projets": "Show the project list",
+  "Masquer la liste des projets": "Hide the project list",
   "relance {n}": "retry {n}",
   "🧑 vérification humaine": "🧑 human check",
   "Les relances automatiques n'ont pas suffi : relis le retour du contrôle, ajuste la consigne si besoin, puis relance.": "Automatic retries were not enough: read the review feedback, adjust the instructions if needed, then relaunch.",
