@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "@/i18n";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { useCallback, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 export { cx };
@@ -184,4 +184,25 @@ export function Markdown({ children, className }: { children: string; className?
 export function ErrorNote({ children }: { children?: ReactNode }) {
   if (!children) return null;
   return <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{children}</div>;
+}
+
+/** A boolean UI preference remembered in this browser (the app renders client-only, so localStorage is safe here). */
+export function usePersistentFlag(key: string, initial: boolean): [boolean, () => void] {
+  const [value, setValue] = useState(() => {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? initial : v === "1";
+    } catch {
+      return initial;
+    }
+  });
+  const toggle = useCallback(() => {
+    setValue((v) => {
+      try {
+        localStorage.setItem(key, v ? "0" : "1");
+      } catch {}
+      return !v;
+    });
+  }, [key]);
+  return [value, toggle];
 }
