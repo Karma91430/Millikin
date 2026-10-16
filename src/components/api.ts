@@ -94,6 +94,40 @@ export type Sprint = {
   start_date: string;
   end_date: string;
   status: "planned" | "active" | "done";
+  review?: SprintReview | null;
+};
+export type SprintMemberStats = { agentId: string; tasks: number; done: number; points: number; pointsDone: number; avgScore: number | null; retries: number; tokens: number; computeMs: number };
+export type SprintAnalytics = {
+  tasks: number;
+  done: number;
+  points: number;
+  pointsDone: number;
+  firstTry: number;
+  avgScore: number | null;
+  retries: number;
+  needsHuman: number;
+  tokens: number;
+  computeMs: number;
+  modelCalls: number;
+  modelErrors: number;
+  days: number;
+  members: SprintMemberStats[];
+  carried: { id: string; title: string; status: string; assignee_id: string }[];
+  delivered: { id: string; title: string; assignee_id: string; score: number | null; points: number }[];
+};
+export type SprintReview = { status: "running" | "done" | "error"; created_at: number; analytics: SprintAnalytics; feedback: { agentId: string; text: string }[]; summary: string; error?: string };
+export type TraceSummary = {
+  id: string;
+  kind: "chat" | "task" | "review" | "live";
+  title: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  endedAt: number;
+  calls: number;
+  tools: number;
+  errors: number;
+  tokens: number;
+  agents: string[];
 };
 export type RunInfo = {
   id: string;

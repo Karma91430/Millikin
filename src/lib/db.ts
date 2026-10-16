@@ -95,6 +95,9 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "complexity", "INTEGER DEFAULT 0"],
   ["tasks", "sprint_id", "TEXT DEFAULT ''"],
   ["usage_logs", "project_id", "TEXT DEFAULT ''"],
+  ["sprints", "review", "TEXT DEFAULT 'null'"],
+  // Kept out of the CRUD columns: the review's trace can be large and is only read by the traces view.
+  ["sprints", "review_trace", "TEXT DEFAULT 'null'"],
   ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
   ["projects", "resources", "TEXT DEFAULT '{}'"],
   ["conversations", "kind", "TEXT DEFAULT ''"],
@@ -222,7 +225,8 @@ export function setSettings(values: Record<string, string>) {
 }
 
 // ---------- generic entity CRUD ----------
-type EntityDef = { table: string; json: string[]; bool: string[]; cols: string[]; order: string };
+/** hidden: columns never returned by the generic reads (large or internal). */
+type EntityDef = { table: string; json: string[]; bool: string[]; cols: string[]; order: string; hidden?: string[] };
 
 export const ENTITIES: Record<string, EntityDef> = {
   agents: {
@@ -247,7 +251,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id", "attempts", "needs_human"],
     order: "created_at",
   },
-  sprints: { table: "sprints", json: [], bool: [], cols: ["project_id", "name", "goal", "start_date", "end_date", "status"], order: "created_at" },
+  sprints: { table: "sprints", json: ["review"], bool: [], cols: ["project_id", "name", "goal", "start_date", "end_date", "status", "review"], order: "created_at", hidden: ["review_trace"] },
   profiles: {
     table: "profiles",
     json: ["tools"],
@@ -280,6 +284,7 @@ function decode(def: EntityDef, row: Row): Row {
     }
   }
   for (const k of def.bool) out[k] = !!row[k];
+  for (const k of def.hidden ?? []) delete out[k];
   return out;
 }
 
@@ -400,6 +405,38 @@ export type Sprint = {
   start_date: string;
   end_date: string;
   status: "planned" | "active" | "done";
+  /** Sprint review written by the first contacts when the sprint is closed. */
+  review: SprintReview | null;
+};
+
+export type SprintMemberStats = { agentId: string; tasks: number; done: number; points: number; pointsDone: number; avgScore: number | null; retries: number; tokens: number; computeMs: number };
+export type SprintAnalytics = {
+  tasks: number;
+  done: number;
+  points: number;
+  pointsDone: number;
+  firstTry: number;
+  avgScore: number | null;
+  retries: number;
+  needsHuman: number;
+  tokens: number;
+  computeMs: number;
+  modelCalls: number;
+  modelErrors: number;
+  days: number;
+  members: SprintMemberStats[];
+  /** Unfinished tasks moved to the next sprint or the backlog. */
+  carried: { id: string; title: string; status: string; assignee_id: string }[];
+  /** Done tasks with their score, for the reviewers. */
+  delivered: { id: string; title: string; assignee_id: string; score: number | null; points: number }[];
+};
+export type SprintReview = {
+  status: "running" | "done" | "error";
+  created_at: number;
+  analytics: SprintAnalytics;
+  feedback: { agentId: string; text: string }[];
+  summary: string;
+  error?: string;
 };
 export type Skill = { id: string; name: string; description: string; content: string; category: string };
 export type McpServer = {

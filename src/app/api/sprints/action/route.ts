@@ -1,7 +1,8 @@
 import { withAccess } from "@/lib/access";
 import { db, get, list, now, upsert, type Sprint, type Task } from "@/lib/db";
+import { sprintAnalytics, startSprintReview } from "@/lib/sprintreview";
 
-/** start: one active sprint per project · close: unfinished tasks move to the next planned sprint (or the backlog). */
+/** start: one active sprint per project · close: unfinished tasks move to the next planned sprint (or the backlog), then the first contacts review it. */
 async function handlePOST(req: Request) {
   const { id, action } = (await req.json()) as { id: string; action: "start" | "close" };
   const sprint = get<Sprint>("sprints", id);
@@ -13,12 +14,20 @@ async function handlePOST(req: Request) {
     const today = new Date().toISOString().slice(0, 10);
     return Response.json(upsert("sprints", { id, status: "active", start_date: sprint.start_date || today }));
   }
+  // Figures first: closing moves the unfinished tasks out of the sprint.
+  const analytics = sprintAnalytics(sprint);
   const next = siblings.find((s) => s.status === "planned" && s.id !== id);
   const open = list<Task>("tasks").filter((t) => t.sprint_id === id && t.status !== "done");
   const move = db().prepare("UPDATE tasks SET sprint_id = ?, updated_at = ? WHERE id = ?");
   for (const t of open) move.run(next?.id ?? "", now(), t.id);
   const closed = upsert("sprints", { id, status: "done", end_date: sprint.end_date || new Date().toISOString().slice(0, 10) });
-  return Response.json({ sprint: closed, moved: open.length, to: next?.name ?? "Backlog" });
+  let review = "";
+  try {
+    startSprintReview(id, analytics);
+  } catch (e) {
+    review = e instanceof Error ? e.message : String(e);
+  }
+  return Response.json({ sprint: closed, moved: open.length, to: next?.name ?? "Backlog", reviewError: review || undefined });
 }
 
 export const POST = withAccess("edit", handlePOST, { project: (b) => get<Sprint>("sprints", String(b.id ?? ""))?.project_id });
