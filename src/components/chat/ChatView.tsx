@@ -70,6 +70,36 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
   const [atBottom, setAtBottom] = useState(true);
   const running = sending || !!runId;
 
+  // Resizable chat panel: drag the divider; the width is remembered (client-only app, localStorage is safe).
+  const [chatWidth, setChatWidth] = useState(() => {
+    try {
+      return Number(localStorage.getItem("millikin:chat-width")) || 520;
+    } catch {
+      return 520;
+    }
+  });
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = chatWidth;
+    let last = startW;
+    const move = (ev: PointerEvent) => {
+      last = Math.round(Math.min(window.innerWidth * 0.75, Math.max(320, startW + startX - ev.clientX)));
+      setChatWidth(last);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      try {
+        localStorage.setItem("millikin:chat-width", String(last));
+      } catch {}
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const loadMessages = useCallback(async (id: string) => setMessages(await api<Message[]>(`/api/conversations?id=${id}`)), []);
 
   useEffect(() => {
@@ -350,8 +380,20 @@ function ChatSession({ agents, projects, onTarget, onNewProject, effective, view
         />
       </section>
 
+      {/* divider: drag to resize the chat */}
+      <div
+        onPointerDown={startResize}
+        onDoubleClick={() => setChatWidth(520)}
+        role="separator"
+        aria-orientation="vertical"
+        title={t("Glisser pour redimensionner le chat (double-clic : taille par défaut)")}
+        className="group relative hidden w-1.5 shrink-0 cursor-col-resize bg-line/40 hover:bg-accent/50 md:block"
+      >
+        <span className="absolute left-1/2 top-1/2 h-8 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-fg-subtle/60 group-hover:bg-accent" />
+      </div>
+
       {/* chat */}
-      <section className="flex w-full min-w-0 flex-col border-l border-line bg-surface-0 md:w-[400px] xl:w-[440px]">
+      <section className="flex w-full min-w-0 shrink-0 flex-col bg-surface-0 md:w-[var(--chat-w)]" style={{ ["--chat-w" as string]: `${chatWidth}px` }}>
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <span className="text-lg">{project ? "📁" : lead.emoji}</span>
           <div className="min-w-0 flex-1">

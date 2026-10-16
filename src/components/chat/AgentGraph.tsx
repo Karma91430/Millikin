@@ -8,6 +8,7 @@ import {
   EdgeLabelRenderer,
   getBezierPath,
   Handle,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -23,7 +24,8 @@ import { useT } from "@/i18n";
 import { layoutOf, type Link } from "@/lib/team";
 import type { CallNode, Trace } from "@/lib/trace";
 import type { Agent } from "../api";
-import { cx } from "../ui";
+import { cx, usePersistentFlag } from "../ui";
+import { Crosshair } from "lucide-react";
 
 type Status = CallNode["status"] | "idle";
 type AgentData = { kind: "agent"; agent: Agent; lead: boolean; call?: CallNode; waitingOn?: string; bubbleSide: "top" | "bottom" };
@@ -231,8 +233,29 @@ function useFitOnResize() {
   return ref;
 }
 
+/**
+ * Follow the work: zoom on the agents that are running (several when they work in parallel), and show
+ * the whole team again when the run ends.
+ */
+function useFollowActive(liveIds: string[], enabled: boolean) {
+  const { fitView } = useReactFlow();
+  const key = liveIds.join(",");
+  const had = useRef(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setTimeout(() => {
+      if (key) fitView({ nodes: key.split(",").map((id) => ({ id })), padding: 0.6, duration: 600, maxZoom: 1.15 });
+      else if (had.current) fitView({ padding: 0.3, duration: 600 });
+      had.current = !!key;
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [key, enabled, fitView]);
+}
+
 function Graph({ agents, entries, links, layout: builderLayout, trace, userText, running, onAgentClick }: GraphProps) {
+  const { t } = useT();
   const containerRef = useFitOnResize();
+  const [follow, toggleFollow] = usePersistentFlag("millikin:graph-follow", true);
   const layoutKey = [...entries, "|", ...agents.map((a) => a.id)].join(",");
   const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
@@ -267,6 +290,9 @@ function Graph({ agents, entries, links, layout: builderLayout, trace, userText,
     return { latest, pairs };
   }, [trace]);
   const live = (c?: CallNode) => !!c && !["done", "error"].includes(c.status);
+  // Agents working right now; an agent waiting on a delegate is not "working", the delegate is.
+  const liveIds = agents.filter((a) => live(latest.get(a.id)) && latest.get(a.id)?.status !== "waiting").map((a) => a.id);
+  useFollowActive(liveIds, follow);
 
   const waitingName = (c?: CallNode) => {
     const pending = c?.tools.filter((t) => t.name === "ask_agent" && t.result === undefined).map((t) => byId.get(trace?.calls[t.childCallId ?? ""]?.agentId ?? "")?.name);
@@ -346,6 +372,15 @@ function Graph({ agents, entries, links, layout: builderLayout, trace, userText,
     >
       <Background gap={22} size={1.2} color="var(--line)" />
       <Controls showInteractive={false} position="bottom-left" />
+      <Panel position="top-right" className="!mt-14">
+        <button
+          onClick={toggleFollow}
+          title={follow ? t("Ne plus suivre l'agent actif") : t("Suivre l'agent actif (zoom automatique)")}
+          className={cx("flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-xs backdrop-blur", follow ? "border-accent/60 bg-accent/15 text-fg" : "border-line bg-surface-1/80 text-fg-muted hover:text-fg")}
+        >
+          <Crosshair size={13} /> {t("Suivre l'agent actif")}
+        </button>
+      </Panel>
     </ReactFlow>
     </div>
   );

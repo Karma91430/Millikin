@@ -1,32 +1,27 @@
 "use client";
 
-import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, LogOut, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, ShieldCheck, Users, X, XCircle } from "lucide-react";
+import { Blocks, Bot, CheckCircle2, FolderKanban, Library, Loader2, LogOut, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, ShieldCheck, Users, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { I18nProvider, LANGS, useT, type Lang } from "@/i18n";
+import { I18nProvider, useT, type Lang } from "@/i18n";
 import { api, useData, type Agent, type Meta, type Project, type RunInfo, type Team } from "./api";
 import { ChatView, type Target } from "./chat/ChatView";
 import { cx, usePersistentFlag } from "./ui";
 import { AdminView, CreditBar, LoginScreen, type AppUser } from "./views/AdminView";
 import { AgentsView } from "./views/AgentsView";
 import { KnowledgeView } from "./views/KnowledgeView";
-import { MachineView } from "./views/MachineView";
 import { McpView } from "./views/McpView";
-import { ModelsView } from "./views/ModelsView";
 import { ProjectsView } from "./views/ProjectsView";
-import { SettingsView } from "./views/SettingsView";
+import { SettingsHub } from "./views/SettingsHub";
 import { SkillsView } from "./views/SkillsView";
 import { TeamsView } from "./views/TeamsView";
 
 const NAV = [
   { id: "chat", label: "Espace de travail", icon: MessagesSquare },
   { id: "projects", label: "Projets", icon: FolderKanban },
-  { id: "agents", label: "Agents", icon: Bot },
-  { id: "teams", label: "Équipes", icon: Users },
+  { id: "team", label: "Agents et équipes", icon: Users },
   { id: "skills", label: "Skills", icon: Blocks },
   { id: "knowledge", label: "Connaissances", icon: Library },
   { id: "mcp", label: "MCP", icon: Plug },
-  { id: "models", label: "Modèles", icon: Cpu },
-  { id: "machine", label: "Machine", icon: Gauge },
   { id: "settings", label: "Réglages", icon: Settings },
   { id: "admin", label: "Administration", icon: ShieldCheck },
 ] as const;
@@ -69,7 +64,8 @@ type Me = { setup: boolean; user: AppUser | null; credits?: { used: number; quot
 
 function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
   const isAdmin = me.setup || me.user?.role === "admin";
-  const { t: tr, lang, setLang } = useT();
+  const [teamTab, setTeamTab] = useState<"agents" | "teams">("agents");
+  const { t: tr } = useT();
   // Wide (icons + labels) on large screens unless the user collapsed it; always icons-only on small screens.
   const [navWide, toggleNav] = usePersistentFlag("millikin:nav-wide", true);
   // Rendered client-only (see ClientApp), so localStorage is safe in the initializer.
@@ -88,12 +84,6 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [createFrom, setCreateFrom] = useState<string | null>(null);
   const meta = useData<Meta>("/api/meta");
-  const prefs = useData<Record<string, string>>("/api/settings");
-  const chatModels = (meta.data?.models ?? []).filter((x) => x.kind !== "embedding");
-  const setDefaultModel = async (ref: string) => {
-    await api("/api/settings", { method: "POST", json: { default_model: ref } });
-    prefs.reload();
-  };
 
   const go = (v: View) => {
     setView(v);
@@ -123,6 +113,12 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
     return () => (clearTimeout(first), clearInterval(t));
   }, [pollRuns]);
   const running = runs.filter((r) => r.status === "running");
+  // Notifications fade out on their own after a few seconds.
+  useEffect(() => {
+    if (!toasts.length) return;
+    const timer = setTimeout(() => setToasts((x) => x.slice(0, -1)), 6000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
   const openRun = (r: RunInfo) => {
     setToasts((t) => t.filter((x) => x.id !== r.id));
     if (r.targetType === "task") {
@@ -201,21 +197,6 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
             {navWide ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             {navWide && <span>{tr("Réduire le menu")}</span>}
           </button>
-          <div className="flex items-center gap-0.5 rounded-lg border border-line p-0.5" title={tr("Langue de l'interface et des réponses des agents")}>
-            <Languages size={14} className={cx("mx-1 hidden shrink-0 text-fg-subtle", navWide && "xl:block")} />
-            {LANGS.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => setLang(l.id)}
-                aria-pressed={lang === l.id}
-                title={l.label}
-                className={cx("flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium uppercase", lang === l.id ? "bg-accent/20 text-fg" : "text-fg-subtle hover:text-fg")}
-              >
-                {l.id}
-              </button>
-            ))}
-          </div>
-          {/* default engine of the agents: switch provider/model in one click */}
           {me.user && (
             <div className={cx("flex items-center gap-2 rounded-lg border border-line p-1.5", !navWide && "justify-center")} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold">{(me.user.name || me.user.email).charAt(0).toUpperCase()}</span>
@@ -237,28 +218,6 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
                 <LogOut size={14} />
               </button>
             </div>
-          )}
-          {navWide && isAdmin && chatModels.length > 0 && (
-            <label className="hidden flex-col gap-1 xl:flex" title={tr("Modèle utilisé par les agents qui n'en ont pas de défini")}>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("Modèle par défaut")}</span>
-              <select
-                value={prefs.data?.default_model ?? ""}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                className="h-8 w-full rounded-md border border-line bg-surface-2 px-1.5 text-[11px] text-fg outline-none focus:border-accent"
-              >
-                {[...new Set(chatModels.map((x) => x.provider))].map((prov) => (
-                  <optgroup key={prov} label={prov}>
-                    {chatModels
-                      .filter((x) => x.provider === prov)
-                      .map((x) => (
-                        <option key={x.ref} value={x.ref}>
-                          {x.label}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
           )}
         </div>
       </nav>
@@ -295,14 +254,37 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
                 onPlanChat={(id) => chatWith({ type: "project", id, planning: true })}
               />
             )}
-            {view === "agents" && m && <AgentsView agents={a} meta={m} onChange={refreshAll} onChat={(id) => chatWith({ type: "agent", id })} />}
-            {view === "teams" && <TeamsView agents={a} teams={t} onChange={refreshAll} onCreateProject={(id) => (setCreateFrom(id), go("projects"))} />}
+            {view === "team" && m && (
+              <div className="flex h-full flex-col">
+                <div className="flex gap-1 border-b border-line px-6 pt-3">
+                  {(
+                    [
+                      ["agents", "Agents", Bot],
+                      ["teams", "Modèles d'équipe", Users],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      onClick={() => setTeamTab(id)}
+                      className={cx("-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm", teamTab === id ? "border-accent text-fg" : "border-transparent text-fg-muted hover:text-fg")}
+                    >
+                      <Icon size={14} /> {tr(label)}
+                    </button>
+                  ))}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {teamTab === "agents" ? (
+                    <AgentsView agents={a} meta={m} onChange={refreshAll} onChat={(id) => chatWith({ type: "agent", id })} />
+                  ) : (
+                    <TeamsView agents={a} teams={t} onChange={refreshAll} onCreateProject={(id) => (setCreateFrom(id), go("projects"))} />
+                  )}
+                </div>
+              </div>
+            )}
             {view === "skills" && <SkillsView />}
             {view === "knowledge" && <KnowledgeView />}
             {view === "mcp" && <McpView />}
-            {view === "models" && <ModelsView onChange={meta.reload} />}
-            {view === "machine" && <MachineView onChange={meta.reload} />}
-            {view === "settings" && m && <SettingsView meta={m} />}
+            {view === "settings" && m && <SettingsHub meta={m} onMetaChange={meta.reload} />}
             {view === "admin" && isAdmin && m && <AdminView meta={m} projects={projects.data ?? []} setupMode={me.setup} onAccountsEnabled={onAuthChange} />}
           </div>
         )}

@@ -23,9 +23,9 @@ const SUGGESTED: [string, string][] = [
 
 const CAP_COLOR: Record<string, string> = { tools: "#10b981", thinking: "#8b5cf6", vision: "#06b6d4", embedding: "#f59e0b", completion: "#64748b" };
 
-export function ModelsView({ onChange }: { onChange: () => void }) {
+export function ModelsView({ onChange, initialTab = "models" }: { onChange: () => void; initialTab?: "models" | "usage" | "hosts" | "proxy" }) {
   const { t } = useT();
-  const [tab, setTab] = useState<"models" | "usage" | "hosts" | "proxy">("models");
+  const [tab, setTab] = useState<"models" | "usage" | "hosts" | "proxy">(initialTab);
   const providers = useData<Provider[]>("/api/crud/providers");
   const [host, setHost] = useState<string>("");
   const hostId = host || providers.data?.find((p) => p.enabled && p.type === "ollama")?.id || "";
