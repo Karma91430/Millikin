@@ -1,4 +1,5 @@
 import { allowedToolGroups } from "./access";
+import { stripTextToolCalls } from "./toolcalls";
 import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
@@ -372,7 +373,7 @@ export async function runAgent(p: RunParams): Promise<string> {
           continue;
         }
         // A final answer that is only a tool call written as text is not an answer: drop the raw block.
-        const text = res.content.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g, "").trim();
+        const text = stripTextToolCalls(res.content);
         const content = (carried + text).trim() || "(pas de réponse : l'agent s'est arrêté sans conclure)";
         emit({ type: "agent_end", callId, content });
         return content;

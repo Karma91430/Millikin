@@ -3,6 +3,7 @@
 // stream text, return tool calls and usage, so agents work the same whatever the engine.
 import { spawn } from "node:child_process";
 import { newId, type Provider } from "./db";
+import { CALL_OPEN, countCalls, lastCallEnd, MAX_CALLS_PER_ANSWER, onlyMoreCalls } from "./toolcalls";
 import type { ChatMessage, StreamResult, ToolCall, ToolDef, Usage } from "./gateway";
 
 export type ProviderType = "ollama" | "openai" | "anthropic" | "claude-code" | "codex";
@@ -198,9 +199,10 @@ function toolProtocol(tools: ToolDef[]) {
 Tu disposes de ces outils, exécutés par Millikin (tu n'as pas d'autre accès au système) :
 ${list}
 
-Pour utiliser un ou plusieurs outils, réponds UNIQUEMENT avec des blocs de cette forme, sans autre texte :
+Pour utiliser un ou plusieurs outils, réponds UNIQUEMENT avec des blocs de cette forme exacte (JSON valide), sans autre texte :
 <tool_call>{"name": "nom_de_l_outil", "arguments": {"argument": "valeur"}}</tool_call>
-Tu recevras ensuite les résultats. Quand tu n'as plus besoin d'outil, donne ta réponse finale normalement.`;
+Puis ARRÊTE-TOI : Millikin exécute les outils et te renvoie leurs résultats. N'écris jamais toi-même un résultat d'outil.
+Quand tu n'as plus besoin d'outil, donne ta réponse finale (compte rendu) en texte normal, sans bloc d'appel.`;
 }
 
 /** Flatten a chat history into one prompt (CLIs take a single input). */
@@ -284,22 +286,20 @@ function textGate(onText?: (t: string) => void, onDone?: () => void) {
     push(t: string) {
       if (done) return;
       all += t;
-      const lastClose = all.lastIndexOf("</tool_call>");
-      if (lastClose >= 0) {
-        // Whitespace or the start of another call may follow a call; anything else is the model writing past it.
-        const after = all.slice(lastClose + "</tool_call>".length).trimStart();
-        if (after && !"<tool_call>".startsWith(after.slice(0, 11)) && !after.startsWith("<tool_call>")) {
-          all = all.slice(0, lastClose + "</tool_call>".length);
-          done = true;
-          onDone?.();
-        }
+      const end = lastCallEnd(all);
+      // Whitespace or the start of another call may follow a call; anything else is the model writing past it.
+      // Past MAX_CALLS_PER_ANSWER calls the model is looping: stop there too.
+      if (end >= 0 && (!onlyMoreCalls(all.slice(end)) || countCalls(all) >= MAX_CALLS_PER_ANSWER)) {
+        all = all.slice(0, end);
+        done = true;
+        onDone?.();
       }
       if (!done && all.length > CLI_MAX_CHARS) {
         done = true;
         onDone?.();
       }
-      const cut = all.indexOf("<tool_call");
-      const visible = cut >= 0 ? all.slice(0, cut) : all.replace(/<[^>]{0,10}$/, "");
+      const cut = all.search(CALL_OPEN);
+      const visible = cut >= 0 ? all.slice(0, cut) : all.replace(/<[^>]{0,16}$/, "");
       if (visible.length > shown.length) {
         onText?.(visible.slice(shown.length));
         shown = visible;

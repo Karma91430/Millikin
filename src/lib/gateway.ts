@@ -3,6 +3,7 @@
 // through the adapters in providers.ts with the same contract: streamed text, tool calls, usage.
 import { db, getSettings, list, logUsage, newId, type ModelRow, type Provider } from "./db";
 import { anthropicChat, cliChat, listProviderModels, openaiChat, openaiEmbed, PROVIDER_PRESETS } from "./providers";
+import { CALL_OPEN, extractTextToolCalls } from "./toolcalls";
 
 export { PROVIDER_PRESETS };
 
@@ -116,24 +117,8 @@ function toNative(messages: ChatMessage[]) {
 
 export type StreamResult = { content: string; reasoning: string; toolCalls: ToolCall[]; usage: Usage };
 
-/**
- * Small local models sometimes write a tool call as text (`<tool_call>{"name": …, "arguments": …}</tool_call>`)
- * instead of using the structured channel. Turn those blocks into real calls (known tools only) and drop them from the text.
- */
-export function extractTextToolCalls(content: string, toolNames: string[]): { calls: ToolCall[]; rest: string } {
-  const calls: ToolCall[] = [];
-  const rest = content.replace(/<tool_call>\s*(\{[\s\S]*?\})\s*(?:<\/tool_call>|$)/g, (block, json: string) => {
-    try {
-      const j = JSON.parse(json) as { name?: string; arguments?: unknown };
-      if (!j.name || !toolNames.includes(j.name)) return block;
-      calls.push({ id: `call_${newId()}`, type: "function", function: { name: j.name, arguments: typeof j.arguments === "string" ? j.arguments : JSON.stringify(j.arguments ?? {}) } });
-      return "";
-    } catch {
-      return block;
-    }
-  });
-  return { calls, rest: rest.trim() };
-}
+// Tool calls written as text (CLIs, small models): parsing shared with the CLI adapter and the orchestrator.
+export { extractTextToolCalls };
 export type Think = "" | "on" | "off";
 
 /** Streaming chat with tool calls, thinking split and usage logging. */
@@ -260,7 +245,7 @@ export async function chatStream(opts: {
     emit(pending);
     logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", ...usage, latency_ms: Date.now() - started, status: "ok" });
     opts.signal?.removeEventListener("abort", onOuterAbort);
-    if (!toolCalls.length && opts.tools?.length && content.includes("<tool_call>")) {
+    if (!toolCalls.length && opts.tools?.length && CALL_OPEN.test(content)) {
       const { calls, rest } = extractTextToolCalls(content, opts.tools.map((t) => t.function.name));
       if (calls.length) return { content: rest, reasoning, toolCalls: calls, usage };
     }
@@ -288,7 +273,7 @@ async function otherChat(res: Resolved, opts: Parameters<typeof chatStream>[0]):
     const type = res.provider.type;
     const r = type === "openai" ? await openaiChat(res.provider, o) : type === "anthropic" ? await anthropicChat(res.provider, o) : await cliChat(res.provider, o);
     log({ ...r.usage, status: "ok" });
-    if (!r.toolCalls.length && opts.tools?.length && r.content.includes("<tool_call>")) {
+    if (!r.toolCalls.length && opts.tools?.length && CALL_OPEN.test(r.content)) {
       const { calls, rest } = extractTextToolCalls(r.content, opts.tools.map((t) => t.function.name));
       if (calls.length) return { ...r, content: rest, toolCalls: calls };
     }

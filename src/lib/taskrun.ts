@@ -51,7 +51,7 @@ function recorder(emit: (ev: TraceEvent) => void) {
       const m = ev.result.match(/^Fichier (?:écrit|modifié) : (\S+)/);
       if (m) actions.written.add(m[1]);
       else if (call?.name === "edit_file" && ev.result.startsWith("Échec")) actions.failedEdits++;
-      if (call?.name === "run_command") actions.commands.push({ command: String(call.args?.command ?? ""), result: ev.result.slice(0, 200) });
+      if (call?.name === "run_command") actions.commands.push({ command: String(call.args?.command ?? ""), result: ev.result.slice(-1500) });
     }
     emit(ev);
   };
@@ -88,20 +88,39 @@ async function missingFiles(report: string, workspace: string) {
   return named.filter((f) => !files.has(f) && !(f.includes("/") ? false : names.has(f)));
 }
 
-/** Facts for the reviewer: what was really written, failed edits, commands, and the content of the files written. */
-async function factsFor(actions: Actions, workspace: string) {
+/**
+ * Facts for the reviewer, gathered by Millikin: files written or modified in this attempt, failed edits,
+ * commands with the end of their output, the current content of the deliverables named in the task
+ * (even if written in an earlier attempt) and the files the report names that are not in the folder.
+ */
+async function factsFor(actions: Actions, workspace: string, task: Task, report: string) {
   const lines: string[] = [];
-  lines.push(actions.written.size ? `Fichiers réellement écrits ou modifiés pendant cette tentative : ${[...actions.written].join(", ")}` : "Aucun fichier n'a été écrit ni modifié pendant cette tentative.");
+  lines.push(actions.written.size ? `Fichiers écrits ou modifiés pendant cette tentative : ${[...actions.written].join(", ")}` : "Aucun fichier écrit ni modifié pendant cette tentative (le travail a pu être fait lors d'une tentative précédente : juge l'état actuel des fichiers ci-dessous).");
   if (actions.failedEdits) lines.push(`${actions.failedEdits} modification(s) de fichier ont échoué (edit_file).`);
-  for (const c of actions.commands.slice(0, 5)) lines.push(`Commande : ${c.command} → ${c.result.split("\n")[0]}`);
-  let budget = 9000;
-  for (const f of [...actions.written].slice(0, 4)) {
-    const content = await fs.readFile(path.join(workspace, f), "utf8").catch(() => null);
-    if (content === null || budget <= 0) continue;
-    const part = content.length > Math.min(3500, budget) ? content.slice(0, Math.min(3500, budget)) + "\n… (tronqué)" : content;
+  let budget = 14000;
+  const take = (text: string, max: number) => {
+    const part = text.length > Math.min(max, budget) ? text.slice(0, Math.min(max, budget)) + "\n… (tronqué)" : text;
     budget -= part.length;
-    lines.push(`\n### Contenu actuel de ${f}\n\`\`\`\n${part}\n\`\`\``);
+    return part;
+  };
+  for (const c of actions.commands.slice(-4)) {
+    if (budget <= 0) break;
+    lines.push(`\n### Commande exécutée : ${c.command.slice(0, 200)}\n\`\`\`\n${take(c.result, 1500)}\n\`\`\``);
   }
+  // Deliverables: files named in the task that exist now, plus those written in this attempt.
+  const named = [...new Set([...`${task.title}\n${task.description}`.matchAll(FILE_RE)].map((m) => m[1].replace(/^\.\//, "")))];
+  const files = [...new Set([...actions.written, ...named])];
+  for (const f of files.slice(0, 8)) {
+    if (budget <= 0) break;
+    const content = await fs.readFile(path.join(workspace, f), "utf8").catch(() => null);
+    if (content === null) continue;
+    lines.push(`\n### Contenu actuel de ${f}\n\`\`\`\n${take(content, 2500)}\n\`\`\``);
+  }
+  const missing = await missingFiles(report, workspace);
+  if (missing.length)
+    lines.push(
+      `\nFichiers nommés dans le compte rendu mais absents du dossier : ${missing.slice(0, 10).join(", ")}. C'est normal s'ils ont été supprimés à dessein ou ne sont que des exemples ; c'est une faute seulement s'ils devaient être livrés.`,
+    );
   return lines.join("\n");
 }
 
@@ -145,7 +164,9 @@ function prepare(taskId: string, opts: { ignoreBlockers?: boolean } = {}) {
 
 export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } = {}): Run {
   const { task, project, team, assignee } = prepare(taskId, opts);
-  const reviewer = team.spec.entry_ids.map((id) => team.agents.get(id)).find((a): a is Agent => !!a && a.id !== assignee.id);
+  // Reviewer: a first contact other than the assignee, preferably one who can check (run commands, read files).
+  const entries = team.spec.entry_ids.map((id) => team.agents.get(id)).filter((a): a is Agent => !!a && a.id !== assignee.id);
+  const reviewer = entries.find((a) => a.tools?.includes("run_command")) ?? entries.find((a) => a.tools?.includes("files_read")) ?? entries[0];
 
   return startRun(
     { id: newId(), conversationId: `task:${task.id}`, targetType: "task", targetId: project.id, title: task.title, userMessage: task.title },
@@ -183,66 +204,55 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
           const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, throwErrors: true, emit: tap, signal, ctx, excludeTools: BOARD_WRITE });
           t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
-          // Hard check before any review: files announced in the report must exist.
-          const missing = await missingFiles(result, ctx.workspace);
-          if (missing.length) {
-            const evaluation: Evaluation = {
-              verdict: "a_corriger",
-              score: 1,
-              comment: `Fichiers annoncés dans le compte rendu mais absents du dossier du projet : ${missing.join(", ")}. Crée-les réellement avec write_file (contenu complet), puis vérifie avec list_files avant de conclure.`,
-              by: "Millikin",
-              at: now(),
-            };
-            t = upsert<Task>("tasks", { id: t.id, evaluation, status: "retry", notes: note(t, "Millikin", `↩️ Vérification automatique : ${evaluation.comment}`) });
-          } else {
-            const facts = await factsFor(actions, ctx.workspace);
+          const facts = await factsFor(actions, ctx.workspace, t, result);
 
-            // Without a reviewer the task stays "En revue" for a person to check.
-            if (reviewer) {
-              const review = await runAgent({
-                agent: reviewer,
-                depth: 1,
-                throwErrors: true,
-                consultOnly: true,
-                // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
-                excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
-                phase: "execution",
-                team,
-                emit,
-                signal,
-                ctx,
-                input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
+          // Without a reviewer the task stays "En revue" for a person to check.
+          if (reviewer) {
+            const review = await runAgent({
+              agent: reviewer,
+              depth: 1,
+              throwErrors: true,
+              consultOnly: true,
+              // Review is read-only: no card creation, no file edits, no commands, no decision log edits.
+              excludeTools: [...BOARD_WRITE, "write_file", "edit_file", "run_command", "http_request", "record_decision"],
+              phase: "execution",
+              team,
+              emit,
+              signal,
+              ctx,
+              input: `Tu contrôles la tâche « ${t.title} » réalisée par ${assignee.name} sur le projet « ${project.name} ».
 
-  Consigne de la tâche :
-  ${t.description || t.title}
+Consigne de la tâche :
+${t.description || t.title}
 
-  Compte rendu de ${assignee.name} (ce qu'il affirme) :
-  ${result}
+Compte rendu de ${assignee.name} (ce qu'il affirme) :
+${result}
 
-  ## Ce que Millikin a constaté (fait foi, relevé automatiquement)
-  ${facts}
+## Ce que Millikin a constaté (fait foi, relevé automatiquement)
+${facts}
 
-  Vérifie le TRAVAIL RÉEL, pas les intentions : juge d'après les fichiers et leur contenu ci-dessus (et lis-en d'autres si besoin), pas d'après le compte rendu.
-  - Si la consigne demande du code ou des documents et qu'aucun fichier pertinent n'a été écrit ou modifié, le verdict est « a_corriger ».
-  - Un compte rendu qui décrit ce qui « serait fait » ou « devrait être fait » sans l'avoir fait est « a_corriger ».
-  - Vérifie aussi la conformité à la consigne, la cohérence avec les tâches dont elle dépend et les décisions du projet, la qualité, les oublis.
-  Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
-  {"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
-              });
-              const evaluation = parseEvaluation(review, reviewer.name);
-              t = upsert<Task>("tasks", {
-                id: t.id,
-                evaluation,
-                status: evaluation.verdict === "valide" ? "done" : "retry",
-                notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
-              });
-              await appendDecision(
-                ctx.workspace,
-                `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
-                `Réalisée par ${assignee.name}. ${evaluation.comment}`,
-                reviewer.name,
-              ).catch(() => {});
-            }
+Vérifie le TRAVAIL RÉEL, pas les intentions : juge d'après les fichiers et leur contenu ci-dessus (et lis-en d'autres si besoin), pas d'après le compte rendu.
+- Juge l'ÉTAT ACTUEL des livrables : s'ils existent et respectent la consigne, la tâche est faite, même si cette tentative n'a rien eu à réécrire.
+- Si un livrable demandé manque ou ne respecte pas la consigne, le verdict est « a_corriger » (dis précisément lequel et pourquoi).
+- Un compte rendu qui décrit ce qui « serait fait » sans que les fichiers le montrent est « a_corriger ».
+- Ne demande pas de recopier des sorties dans le compte rendu : les commandes exécutées et le contenu des fichiers sont dans les faits ci-dessus.
+- Vérifie aussi la conformité à la consigne, la cohérence avec les tâches dont elle dépend et les décisions du projet, la qualité, les oublis.
+Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
+{"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
+            });
+            const evaluation = parseEvaluation(review, reviewer.name);
+            t = upsert<Task>("tasks", {
+              id: t.id,
+              evaluation,
+              status: evaluation.verdict === "valide" ? "done" : "retry",
+              notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
+            });
+            await appendDecision(
+              ctx.workspace,
+              `Tâche #${t.id} « ${t.title} » : ${evaluation.verdict === "valide" ? "validée" : "à corriger"} (${evaluation.score}/5)`,
+              `Réalisée par ${assignee.name}. ${evaluation.comment}`,
+              reviewer.name,
+            ).catch(() => {});
           }
         } catch (e) {
           const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);
