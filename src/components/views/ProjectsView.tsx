@@ -102,7 +102,64 @@ export function ProjectsView({
   return (
     <div className="flex h-full min-h-0">
       {/* project sub-menu: full list, or a thin rail of initials when collapsed (hover opens it over the content) */}
-      <div className={cx("relative h-full shrink-0", listWide ? "w-64" : "w-12")} onMouseEnter={() => !listWide && setPeekList(true)} onMouseLeave={() => setPeekList(false)}>
+      <div className={cx("relative h-full shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", listWide ? "w-64" : "w-12")} onMouseEnter={() => !listWide && setPeekList(true)} onMouseLeave={() => setPeekList(false)}>
+        {/* Same element pinned or peeked, so opening, closing and pinning all animate. */}
+        <aside
+          className={cx(
+            "absolute inset-y-0 left-0 z-30 overflow-hidden border-r border-line bg-surface-0 transition-[width,opacity,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            listWide ? "w-64 shadow-none" : peekList ? "w-64 opacity-100 shadow-2xl shadow-black/50" : "pointer-events-none w-12 opacity-0 shadow-none",
+          )}
+        >
+          <div className="flex h-full w-64 flex-col">
+              <div className="flex items-center justify-between px-4 pb-2 pt-4">
+                <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
+                <span className="flex">
+                  <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
+                    <FolderPlus size={15} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => (toggleList(), setPeekList(false))}
+                    title={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
+                    aria-label={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
+                  >
+                    {listWide ? <PanelLeftClose size={15} /> : <Pin size={15} />}
+                  </Button>
+                </span>
+              </div>
+              <div className="flex-1 overflow-y-auto px-2 pb-3">
+                {list.map((p) => {
+                  const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
+                  const done = mine.filter((x) => x.status === "done").length;
+                  const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
+                  return (
+                    <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
+                        {busy && <Loader2 size={13} className="animate-spin text-accent" />}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
+                        <span>
+                          {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
+                        </span>
+                        {mine.length > 0 && (
+                          <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+                            <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+                {!list.length && projects && (
+                  <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
+                    {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
+                  </button>
+                )}
+              </div>
+          </div>
+        </aside>
         {!listWide && (
           <aside className="flex h-full w-12 flex-col items-center gap-1 border-r border-line py-3">
             <Button size="sm" variant="ghost" onClick={toggleList} title={t("Épingler la liste des projets")} aria-label={t("Épingler la liste des projets")}>
@@ -130,57 +187,6 @@ export function ProjectsView({
                   </button>
                 );
               })}
-            </div>
-          </aside>
-        )}
-        {(listWide || peekList) && (
-          <aside className={cx("flex h-full w-64 flex-col border-r border-line bg-surface-0", !listWide && "absolute inset-y-0 left-0 z-30 shadow-2xl shadow-black/50")}>
-            <div className="flex items-center justify-between px-4 pb-2 pt-4">
-              <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
-              <span className="flex">
-                <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
-                  <FolderPlus size={15} />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => (toggleList(), setPeekList(false))}
-                  title={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
-                  aria-label={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
-                >
-                  {listWide ? <PanelLeftClose size={15} /> : <Pin size={15} />}
-                </Button>
-              </span>
-            </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-3">
-              {list.map((p) => {
-                const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
-                const done = mine.filter((x) => x.status === "done").length;
-                const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
-                return (
-                  <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
-                    <div className="flex items-center gap-2">
-                      <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
-                      {busy && <Loader2 size={13} className="animate-spin text-accent" />}
-                    </div>
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
-                      <span>
-                        {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
-                      </span>
-                      {mine.length > 0 && (
-                        <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
-                          <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-              {!list.length && projects && (
-                <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
-                  {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
-                </button>
-              )}
             </div>
           </aside>
         )}

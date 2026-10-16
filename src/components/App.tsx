@@ -69,8 +69,9 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
   // Wide (icons + labels) on large screens unless the user collapsed it; always icons-only on small screens.
   const [navWide, toggleNav] = usePersistentFlag("millikin:nav-wide", true);
   const [peek, setPeek] = useState(false);
-  // Labels show when the menu is peeked open, or pinned wide on a large screen ("hidden" would win over "block" if both were set).
-  const labelCls = peek ? "block" : navWide ? "hidden xl:block" : "hidden";
+  // Labels show when the menu is peeked open, or pinned wide on a large screen.
+  // The layout stays the same open or closed: only the width animates and labels fade, so nothing jumps.
+  const labelCls = cx("transition-opacity duration-200", peek ? "opacity-100" : navWide ? "pointer-events-none opacity-0 xl:pointer-events-auto xl:opacity-100" : "pointer-events-none opacity-0");
   // Rendered client-only (see ClientApp), so localStorage is safe in the initializer.
   const [view, setView] = useState<View>(() => {
     try {
@@ -151,15 +152,15 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
   return (
     <div className="flex h-screen min-h-0">
       {/* Collapsed menu: hovering opens it over the content, leaving closes it; the pin keeps it open. */}
-      <div className={cx("relative w-14 shrink-0", navWide && "xl:w-52")} onMouseEnter={() => setPeek(true)} onMouseLeave={() => setPeek(false)}>
+      <div className={cx("relative w-14 shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", navWide && "xl:w-52")} onMouseEnter={() => setPeek(true)} onMouseLeave={() => setPeek(false)}>
       <nav
         className={cx(
-          "absolute inset-y-0 left-0 z-40 flex flex-col gap-1 border-r border-line bg-surface-1 py-3",
-          peek ? "w-52 items-stretch px-2" : navWide ? "w-14 items-center xl:w-52 xl:items-stretch xl:px-2" : "w-14 items-center",
-          peek && !navWide && "shadow-2xl shadow-black/50",
+          "absolute inset-y-0 left-0 z-40 flex flex-col gap-1 overflow-hidden border-r border-line bg-surface-1 px-2 py-3 transition-[width,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          peek ? "w-52" : navWide ? "w-14 xl:w-52" : "w-14",
+          peek && !navWide ? "shadow-2xl shadow-black/50" : "shadow-none",
         )}
       >
-        <div className={cx("mb-3 flex items-center gap-2", peek ? "px-2" : navWide ? "px-1 xl:px-2" : "px-1")}>
+        <div className={"mb-3 flex items-center gap-2 px-1"}>
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">M</span>
           <span className={cx("text-sm font-semibold", labelCls)}>Millikin</span>
         </div>
@@ -169,7 +170,7 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
             onClick={() => go(id)}
             title={tr(label)}
             className={cx(
-              "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm transition",
+              "flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors",
               view === id ? "bg-accent/15 text-fg" : "text-fg-muted hover:bg-surface-2 hover:text-fg",
             )}
           >
@@ -185,7 +186,7 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
           </button>
         ))}
         {running.length > 0 && (
-          <div className={cx("mt-4 flex-col gap-1", peek ? "flex" : navWide ? "hidden xl:flex" : "hidden")}>
+          <div className={cx("mt-4 flex flex-col gap-1", labelCls)}>
             <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("En cours")}</div>
             {running.map((r) => (
               <button key={r.id} onClick={() => openRun(r)} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-fg-muted hover:bg-surface-2" title={r.title}>
@@ -198,18 +199,18 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
             ))}
           </div>
         )}
-        <div className={cx("mt-auto flex flex-col gap-2", peek ? "px-2.5" : navWide ? "px-1 xl:px-2.5" : "px-1")}>
+        <div className={"mt-auto flex flex-col gap-2"}>
           <button
             onClick={() => (toggleNav(), setPeek(false))}
             title={navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}
             aria-label={navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}
-            className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg"
+            className="flex h-8 items-center gap-2.5 rounded-lg px-3 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg"
           >
             {navWide ? <PanelLeftClose size={16} className="shrink-0" /> : <Pin size={16} className="shrink-0" />}
             <span className={cx("whitespace-nowrap", labelCls)}>{navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}</span>
           </button>
           {me.user && (
-            <div className={cx("flex items-center gap-2 rounded-lg border border-line p-1.5", !peek && !navWide && "justify-center")} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
+            <div className={"flex items-center gap-2 rounded-lg border border-line p-1"} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold">{(me.user.name || me.user.email).charAt(0).toUpperCase()}</span>
               <span className={cx("min-w-0 flex-1", labelCls)}>
                 <span className="block truncate text-xs text-fg">{me.user.name || me.user.email}</span>
