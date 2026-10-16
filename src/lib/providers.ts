@@ -220,13 +220,31 @@ function transcript(messages: ChatMessage[]) {
   return parts.join("\n\n") + "\n\n### Toi (assistant)\n";
 }
 
-function runCli(cmd: string, args: string[], input: string, signal: AbortSignal | undefined, onLine: (line: string) => void): Promise<void> {
+/** Hard limits per CLI call: a stuck or runaway generation must not freeze a task. */
+const CLI_TIMEOUT_MS = 5 * 60_000;
+const CLI_MAX_CHARS = 60_000;
+
+/**
+ * Run a CLI and stream its stdout lines. `control.stop()` ends it early on purpose (the answer is
+ * complete): the call then resolves normally. A timeout rejects.
+ */
+function runCli(cmd: string, args: string[], input: string, signal: AbortSignal | undefined, onLine: (line: string) => void, control: { stop?: () => void } = {}): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: process.env });
     let err = "";
     let buf = "";
+    let stopped = false;
+    let timedOut = false;
     const abort = () => child.kill("SIGTERM");
     signal?.addEventListener("abort", abort);
+    control.stop = () => {
+      stopped = true;
+      child.kill("SIGTERM");
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, CLI_TIMEOUT_MS);
     child.stdout.on("data", (d: Buffer) => {
       buf += d.toString("utf8");
       let nl: number;
@@ -239,9 +257,12 @@ function runCli(cmd: string, args: string[], input: string, signal: AbortSignal 
     child.stderr.on("data", (d: Buffer) => (err += d.toString("utf8")));
     child.on("error", (e) => reject(new Error(`${cmd} introuvable ou impossible à lancer : ${e.message}`)));
     child.on("close", (code) => {
+      clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      if (buf.trim()) onLine(buf);
+      if (buf.trim() && !stopped) onLine(buf);
       if (signal?.aborted) reject(new Error("Arrêté"));
+      else if (stopped) resolve();
+      else if (timedOut) reject(new Error(`${cmd} : pas de réponse complète après ${CLI_TIMEOUT_MS / 60_000} min`));
       else if (code !== 0) reject(new Error(`${cmd} a échoué (code ${code}) : ${err.slice(-400) || "aucun détail"}`));
       else resolve();
     });
@@ -249,13 +270,34 @@ function runCli(cmd: string, args: string[], input: string, signal: AbortSignal 
   });
 }
 
-/** Stream text but hold it back once a <tool_call> starts, so raw calls never reach the screen. */
-function textGate(onText?: (t: string) => void) {
+/**
+ * Stream text but hold it back once a <tool_call> starts, so raw calls never reach the screen. Text
+ * engines tend to keep going after a tool call (inventing its result, the next turns…): as soon as
+ * something other than another call follows a complete call, or the answer grows past the limit,
+ * `onDone` fires so the caller can stop the generation; the text is cut at that point.
+ */
+function textGate(onText?: (t: string) => void, onDone?: () => void) {
   let shown = "";
   let all = "";
+  let done = false;
   return {
     push(t: string) {
+      if (done) return;
       all += t;
+      const lastClose = all.lastIndexOf("</tool_call>");
+      if (lastClose >= 0) {
+        // Whitespace or the start of another call may follow a call; anything else is the model writing past it.
+        const after = all.slice(lastClose + "</tool_call>".length).trimStart();
+        if (after && !"<tool_call>".startsWith(after.slice(0, 11)) && !after.startsWith("<tool_call>")) {
+          all = all.slice(0, lastClose + "</tool_call>".length);
+          done = true;
+          onDone?.();
+        }
+      }
+      if (!done && all.length > CLI_MAX_CHARS) {
+        done = true;
+        onDone?.();
+      }
       const cut = all.indexOf("<tool_call");
       const visible = cut >= 0 ? all.slice(0, cut) : all.replace(/<[^>]{0,10}$/, "");
       if (visible.length > shown.length) {
@@ -276,7 +318,8 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
     .filter(Boolean)
     .join("\n\n");
   const sys = [system, extra].filter(Boolean).join("\n\n");
-  const gate = textGate(o.onText);
+  const control: { stop?: () => void } = {};
+  const gate = textGate(o.onText, () => control.stop?.());
   const usage: Usage = { prompt_tokens: 0, completion_tokens: 0 };
   const cmd = p.base_url || (type === "codex" ? "codex" : "claude");
 
@@ -301,7 +344,7 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
         usage.prompt_tokens = u?.input_tokens ?? 0;
         usage.completion_tokens = u?.output_tokens ?? 0;
       }
-    });
+    }, control);
     if (!gate.text && finalText) gate.push(finalText);
   } else {
     // Codex: non-interactive, read-only sandbox, JSON events; the final agent message is the answer.
@@ -317,8 +360,10 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
       if ((e.type === "item.completed" && item?.type === "agent_message") || item?.type === "agent_message") gate.push((item.text ?? item.message ?? "") + "\n");
       const u = e.usage as { input_tokens?: number; output_tokens?: number } | undefined;
       if (u) Object.assign(usage, { prompt_tokens: u.input_tokens ?? 0, completion_tokens: u.output_tokens ?? 0 });
-    });
+    }, control);
   }
+  // A call stopped early has no final usage report: estimate the output from its length.
+  if (!usage.completion_tokens && gate.text) usage.completion_tokens = Math.round(gate.text.length / 4);
   return { content: gate.text.trim(), reasoning: "", toolCalls: [], usage };
 }
 
