@@ -1,8 +1,9 @@
+import { withAccess } from "@/lib/access";
 import { get, newId, type McpServer } from "@/lib/db";
 import { disconnectMcp, listMcpTools } from "@/lib/mcp";
 
 /** Connect to a saved server (by id) or an unsaved draft, and list its tools. */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = (await req.json()) as Partial<McpServer> & { id?: string };
   const saved = body.id ? get<McpServer>("mcp", body.id) : undefined;
   const server = { ...(saved ?? {}), ...body, id: body.id || `draft-${newId()}` } as McpServer;
@@ -15,3 +16,5 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 }
+
+export const POST = withAccess("agents", handlePOST, {});

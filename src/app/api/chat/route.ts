@@ -1,3 +1,4 @@
+import { assertCredits, denied, guard, guardProject, runAs } from "@/lib/access";
 import { db, get, newId, now, type Agent, type Project } from "@/lib/db";
 import type { ChatMessage } from "@/lib/gateway";
 import { PLANNING_SCOPING, runAgent, teamRuntime, type Phase, type TeamRuntime } from "@/lib/orchestrator";
@@ -22,6 +23,14 @@ export async function POST(req: Request) {
   const body = (await req.json()) as Body;
   const d = db();
   if (!body.message?.trim()) return Response.json({ error: "Message vide" }, { status: 400 });
+  let user;
+  try {
+    user = guard(req, "edit");
+    assertCredits(user);
+    if (body.targetType === "project") guardProject(user, body.targetId);
+  } catch (e) {
+    return denied(e);
+  }
 
   let speaker: Agent | undefined;
   let team: TeamRuntime | undefined;
@@ -48,13 +57,14 @@ export async function POST(req: Request) {
     kind = body.kind === "planning" && project ? "planning" : "";
     // Planning conversations always start with a scoping discussion.
     phase = kind === "planning" || team?.spec.clarify ? "cadrage" : "free";
-    d.prepare("INSERT INTO conversations (id, target_type, target_id, title, phase, kind, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)").run(
+    d.prepare("INSERT INTO conversations (id, target_type, target_id, title, phase, kind, user_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
       conversationId,
       body.targetType,
       body.targetId,
       kind === "planning" ? `🗂️ Cadrage : ${title}` : title,
       phase,
       kind,
+      user?.id ?? "",
       now(),
       now(),
     );
@@ -106,8 +116,10 @@ export async function POST(req: Request) {
 
   const convId = conversationId;
   const lead = speaker;
-  const run = startRun(
-    { id: newId(), conversationId: convId, targetType: body.targetType, targetId: body.targetId, title, userMessage: body.message },
+  // The run is attributed to the user: their credits, their tool rights.
+  const run = runAs(user?.id, () =>
+    startRun(
+    { id: newId(), conversationId: convId, targetType: body.targetType, targetId: body.targetId, title, userMessage: body.message, userId: user?.id },
     async (emit, signal) => {
       let content = "";
       try {
@@ -154,6 +166,7 @@ export async function POST(req: Request) {
       d.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now(), convId);
       emit({ type: "done", messageId });
     },
+    ),
   );
   return streamRun(run);
 }

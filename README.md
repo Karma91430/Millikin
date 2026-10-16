@@ -44,6 +44,7 @@ Think of it as **LiteLLM and an agent workspace fused together**, with a Kanban 
 | 🏃 **Planning & sprints** | One click: the project lead, with the tech lead, breaks the project into **estimated tasks** (story points, priority, assignee) grouped into **sprints**. |
 | 👤 **Agent profiles** | 34 ready-made profiles in 7 categories, each with the tools its role needs; your own profiles; AI-generated agents or whole teams. |
 | 🔌 **Any model engine** | Ollama (default, local), OpenAI-compatible APIs (OpenAI, Mistral, Groq, OpenRouter, LM Studio), Anthropic, or the **Claude Code / Codex CLIs** with your subscription. Switch the default model from the sidebar. |
+| 👥 **Accounts & admin space** | Optional multi-user mode: roles (admin / member / viewer), visible projects, allowed tools, team and project limits, monthly **credits** (tokens weighted per provider), local-network access. |
 | 🆕 **Guided project setup** | Name and description, then a team **suggested by AI** (from your agents and 34 profiles), picked by hand or copied from a template, and the **modules** you need. |
 | 📚 **RAG, skills, MCP** | Local embeddings over your docs (txt, md, pdf, code), reusable Markdown skills, and any **MCP** server (stdio or HTTP). |
 | 🏷️ **Knowledge graph** | Documents tagged by the **local model** (one theme + specific tags), shown as constellations; an animated search lab shows hybrid search and reranking step by step. |
@@ -134,7 +135,9 @@ Both are git-ignored.
 
 ## Security notes
 
-- The server listens on **127.0.0.1 only**: stdio MCP servers and `run_command` execute local commands with your user.
+- By default the server listens on **127.0.0.1 only** and runs in single-user mode: stdio MCP servers and `run_command` execute local commands with your user.
+- **Accounts** (Administration → create the admin account) turn on login for everyone: scrypt-hashed passwords, httpOnly session cookies, permissions checked on every API route, tools filtered per user.
+- **Local network**: enable it in Administration → Access and credits, then start with `npm run dev:lan` (or `start:lan`). The script refuses to bind to `0.0.0.0` until an admin account exists, so every network request needs a session. The OpenAI-compatible proxy accepts network calls only when a proxy key is set.
 - Provider keys and MCP headers are stored in plain text in the local SQLite database.
 - File tools cannot leave the project folder; `run_command` is opt-in per agent.
 

@@ -1,3 +1,4 @@
+import { withAccess } from "@/lib/access";
 import { list, upsert, type Agent, type Skill } from "@/lib/db";
 import { SKILL_LIBRARY } from "@/lib/skillLibrary";
 
@@ -19,7 +20,7 @@ export async function GET() {
  * which replaces their text with the library version. `assign` also gives each skill to the agents
  * whose name matches one of its recommended profiles.
  */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { names, update, assign } = (await req.json().catch(() => ({}))) as { names?: string[]; update?: string[]; assign?: boolean };
   const wanted = SKILL_LIBRARY.filter((s) => (!names?.length && !update?.length) || names?.includes(s.name) || update?.includes(s.name));
   const byName = new Map(list<Skill>("skills").map((s) => [key(s.name), s]));
@@ -50,3 +51,5 @@ export async function POST(req: Request) {
     }
   return Response.json({ added, updated, assigned, total: wanted.length });
 }
+
+export const POST = withAccess("agents", handlePOST, {});

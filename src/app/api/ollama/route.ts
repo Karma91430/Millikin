@@ -1,3 +1,4 @@
+import { withAccess } from "@/lib/access";
 import { get, list, type Provider } from "@/lib/db";
 import { capabilities, discoverModels, ollamaBase, ollamaHeaders } from "@/lib/gateway";
 
@@ -43,7 +44,7 @@ export async function GET(req: Request) {
 }
 
 /** Actions: pull (streams progress as NDJSON), delete, unload, sync. */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { action, model, providerId } = (await req.json()) as { action: string; model?: string; providerId?: string };
   try {
     const p = host(providerId ?? null);
@@ -77,3 +78,5 @@ export async function POST(req: Request) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 }
+
+export const POST = withAccess("admin", handlePOST, {});

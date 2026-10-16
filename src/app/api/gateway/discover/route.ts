@@ -1,7 +1,8 @@
+import { withAccess } from "@/lib/access";
 import { get, list, type Provider } from "@/lib/db";
 import { discoverModels } from "@/lib/gateway";
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { providerId } = (await req.json().catch(() => ({}))) as { providerId?: string };
   const targets = providerId ? [get<Provider>("providers", providerId)].filter(Boolean) as Provider[] : list<Provider>("providers").filter((p) => p.enabled);
   const results = [];
@@ -14,3 +15,5 @@ export async function POST(req: Request) {
   }
   return Response.json(results);
 }
+
+export const POST = withAccess("admin", handlePOST, {});

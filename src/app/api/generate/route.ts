@@ -1,9 +1,10 @@
+import { withAccess } from "@/lib/access";
 import { upsert } from "@/lib/db";
 import { generateAgent, generateSkill, generateTeam } from "@/lib/generator";
 
 type Body = { kind: "agent" | "team" | "skill"; description: string; size?: number; save?: boolean };
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const b = (await req.json()) as Body;
   if (!b.description?.trim()) return Response.json({ error: "Description vide" }, { status: 400 });
   try {
@@ -33,3 +34,5 @@ export async function POST(req: Request) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
+
+export const POST = withAccess("agents", handlePOST, { credits: true });

@@ -1,11 +1,12 @@
 "use client";
 
-import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, Users, X, XCircle } from "lucide-react";
+import { Blocks, Bot, CheckCircle2, Cpu, FolderKanban, Gauge, Languages, Library, Loader2, LogOut, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, ShieldCheck, Users, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { I18nProvider, LANGS, useT, type Lang } from "@/i18n";
 import { api, useData, type Agent, type Meta, type Project, type RunInfo, type Team } from "./api";
 import { ChatView, type Target } from "./chat/ChatView";
 import { cx, usePersistentFlag } from "./ui";
+import { AdminView, CreditBar, LoginScreen, type AppUser } from "./views/AdminView";
 import { AgentsView } from "./views/AgentsView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MachineView } from "./views/MachineView";
@@ -27,6 +28,7 @@ const NAV = [
   { id: "models", label: "Modèles", icon: Cpu },
   { id: "machine", label: "Machine", icon: Gauge },
   { id: "settings", label: "Réglages", icon: Settings },
+  { id: "admin", label: "Administration", icon: ShieldCheck },
 ] as const;
 type View = (typeof NAV)[number]["id"];
 
@@ -54,14 +56,19 @@ export function App() {
     } catch {}
     api("/api/settings", { method: "POST", json: { language: l } }).catch(() => {});
   }, []);
+  // Accounts: setup mode (no account yet, single user), a session, or the login screen.
+  const me = useData<Me>("/api/auth/me");
   return (
     <I18nProvider lang={lang} setLang={setLang}>
-      <Workspace />
+      {!me.data && !me.error ? null : me.error || (!me.data?.setup && !me.data?.user) ? <LoginScreen onLogged={me.reload} /> : <Workspace me={me.data!} onAuthChange={me.reload} />}
     </I18nProvider>
   );
 }
 
-function Workspace() {
+type Me = { setup: boolean; user: AppUser | null; credits?: { used: number; quota: number; remaining: number | null } };
+
+function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
+  const isAdmin = me.setup || me.user?.role === "admin";
   const { t: tr, lang, setLang } = useT();
   // Wide (icons + labels) on large screens unless the user collapsed it; always icons-only on small screens.
   const [navWide, toggleNav] = usePersistentFlag("millikin:nav-wide", true);
@@ -149,7 +156,7 @@ function Workspace() {
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">M</span>
           <span className={cx("hidden text-sm font-semibold", navWide && "xl:block")}>Millikin</span>
         </div>
-        {NAV.map(({ id, label, icon: Icon }) => (
+        {NAV.filter((n) => n.id !== "admin" || isAdmin).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => go(id)}
@@ -209,7 +216,29 @@ function Workspace() {
             ))}
           </div>
           {/* default engine of the agents: switch provider/model in one click */}
-          {navWide && chatModels.length > 0 && (
+          {me.user && (
+            <div className={cx("flex items-center gap-2 rounded-lg border border-line p-1.5", !navWide && "justify-center")} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold">{(me.user.name || me.user.email).charAt(0).toUpperCase()}</span>
+              {navWide && (
+                <span className="hidden min-w-0 flex-1 xl:block">
+                  <span className="block truncate text-xs text-fg">{me.user.name || me.user.email}</span>
+                  {me.credits && me.credits.quota > 0 ? <CreditBar used={me.credits.used} quota={me.credits.quota} /> : <span className="block text-[10px] text-fg-subtle">{tr(me.user.role === "admin" ? "Administrateur" : me.user.role === "viewer" ? "Lecteur" : "Membre")}</span>}
+                </span>
+              )}
+              <button
+                onClick={async () => {
+                  await api("/api/auth/logout", { method: "POST" });
+                  onAuthChange();
+                }}
+                title={tr("Se déconnecter")}
+                aria-label={tr("Se déconnecter")}
+                className={cx("text-fg-subtle hover:text-fg", !navWide && "hidden")}
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          )}
+          {navWide && isAdmin && chatModels.length > 0 && (
             <label className="hidden flex-col gap-1 xl:flex" title={tr("Modèle utilisé par les agents qui n'en ont pas de défini")}>
               <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("Modèle par défaut")}</span>
               <select
@@ -274,6 +303,7 @@ function Workspace() {
             {view === "models" && <ModelsView onChange={meta.reload} />}
             {view === "machine" && <MachineView onChange={meta.reload} />}
             {view === "settings" && m && <SettingsView meta={m} />}
+            {view === "admin" && isAdmin && m && <AdminView meta={m} projects={projects.data ?? []} setupMode={me.setup} onAccountsEnabled={onAuthChange} />}
           </div>
         )}
       </main>

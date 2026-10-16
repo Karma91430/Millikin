@@ -1,9 +1,10 @@
+import { withAccess } from "@/lib/access";
 import { get, type Provider } from "@/lib/db";
 import { discoverModels } from "@/lib/gateway";
 import { cliAvailable } from "@/lib/providers";
 
 /** Check a provider: the CLI is installed, or the API answers (and sync its model list). */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { providerId } = (await req.json()) as { providerId: string };
   const p = get<Provider>("providers", providerId);
   if (!p) return Response.json({ error: "Fournisseur introuvable" }, { status: 404 });
@@ -20,3 +21,5 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 }
+
+export const POST = withAccess("admin", handlePOST, {});
