@@ -14,7 +14,11 @@ const deny = (req: NextRequest, status: number, message: string) =>
 
 export function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  const local = LOCAL_HOSTS.has(req.nextUrl.hostname);
+  // Hostname the browser asked for. It is a client header, so this check only gives a clear message to
+  // network users when access is off: the real boundary is the binding (127.0.0.1 unless dev:lan, which
+  // requires an admin account, so every network request needs a valid session anyway).
+  const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "");
+  const local = LOCAL_HOSTS.has(host || req.nextUrl.hostname);
   const users = hasUsers();
 
   // Other machines only when allowed, and never before an admin account exists.
