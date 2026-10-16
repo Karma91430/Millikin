@@ -1,4 +1,5 @@
 // English dictionary, keyed by the French source text. One file per area keeps parallel edits apart.
+import { admin } from "./admin";
 import { agents } from "./agents";
 import { app } from "./app";
 import { chat } from "./chat";
@@ -7,4 +8,4 @@ import { machine } from "./machine";
 import { models } from "./models";
 import { projects } from "./projects";
 
-export const EN: Record<string, string> = { ...app, ...agents, ...chat, ...knowledge, ...models, ...projects, ...machine };
+export const EN: Record<string, string> = { ...app, ...admin, ...agents, ...chat, ...knowledge, ...models, ...projects, ...machine };

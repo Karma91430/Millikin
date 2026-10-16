@@ -1,3 +1,4 @@
+import { withAccess } from "@/lib/access";
 import { retagAll, suggestTags, tagCounts } from "@/lib/rag";
 
 /** Tags in use (?kbIds=a,b to restrict). */
@@ -10,7 +11,7 @@ export async function GET(req: Request) {
  * { docId }: suggest tags for a document with the local default model.
  * { retag: true, kbIds }: retag every document of these bases; streams one JSON line per step.
  */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = (await req.json()) as { docId?: string; retag?: boolean; kbIds?: string[] };
   if (body.retag) {
     const enc = new TextEncoder();
@@ -33,3 +34,5 @@ export async function POST(req: Request) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
+
+export const POST = withAccess("agents", handlePOST, { credits: true });

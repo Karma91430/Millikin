@@ -1,7 +1,8 @@
+import { withAccess } from "@/lib/access";
 import { db, get, list, now, upsert, type Sprint, type Task } from "@/lib/db";
 
 /** start: one active sprint per project · close: unfinished tasks move to the next planned sprint (or the backlog). */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { id, action } = (await req.json()) as { id: string; action: "start" | "close" };
   const sprint = get<Sprint>("sprints", id);
   if (!sprint) return Response.json({ error: "Sprint introuvable" }, { status: 404 });
@@ -19,3 +20,5 @@ export async function POST(req: Request) {
   const closed = upsert("sprints", { id, status: "done", end_date: sprint.end_date || new Date().toISOString().slice(0, 10) });
   return Response.json({ sprint: closed, moved: open.length, to: next?.name ?? "Backlog" });
 }
+
+export const POST = withAccess("edit", handlePOST, { project: (b) => get<Sprint>("sprints", String(b.id ?? ""))?.project_id });

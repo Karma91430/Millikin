@@ -1,3 +1,4 @@
+import { denied, guard, guardProject, withAccess } from "@/lib/access";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -31,7 +32,7 @@ async function inside(root: string, rel: string) {
 }
 
 /** Read-only view of a project workspace: ?projectId=…[&file=relative/path]. */
-export async function GET(req: Request) {
+async function handleGET(req: Request) {
   const sp = new URL(req.url).searchParams;
   const root = await rootFor(sp.get("projectId"));
   const file = sp.get("file");
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
 }
 
 /** Open the workspace (or a file in it) in Finder or VS Code on this Mac. */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { projectId, file, app } = (await req.json()) as { projectId?: string; file?: string; app: "finder" | "vscode" };
   const root = await rootFor(projectId ?? null);
   const target = await inside(root, file ?? "");
@@ -59,3 +60,16 @@ export async function POST(req: Request) {
     execFile(cmd, args as string[], (err) => resolve(err ? Response.json({ error: err.message }, { status: 500 }) : Response.json({ ok: true }))),
   );
 }
+
+/** Read access to the project given in ?projectId=. */
+export async function GET(req: Request) {
+  try {
+    guardProject(guard(req, "read"), new URL(req.url).searchParams.get("projectId"));
+    return await handleGET(req);
+  } catch (e) {
+    return denied(e);
+  }
+}
+
+// Opens Finder / VS Code on the Millikin machine itself: admins only.
+export const POST = withAccess("admin", handlePOST);

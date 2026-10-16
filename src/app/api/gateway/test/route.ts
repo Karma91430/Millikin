@@ -1,6 +1,7 @@
+import { withAccess } from "@/lib/access";
 import { chatStream } from "@/lib/gateway";
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { model } = (await req.json()) as { model: string };
   const t = Date.now();
   try {
@@ -10,3 +11,5 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e), latency_ms: Date.now() - t });
   }
 }
+
+export const POST = withAccess("admin", handlePOST, {});

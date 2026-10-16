@@ -1,3 +1,4 @@
+import { withAccess } from "@/lib/access";
 import { list, type Agent } from "@/lib/db";
 import { complete } from "@/lib/gateway";
 import { ALL_MODULES, PROJECT_MODULES } from "@/lib/modules";
@@ -15,7 +16,7 @@ const parse = <T>(raw: string): T | null => {
  * Suggestions for a new project, from its name and description, with the default model:
  * `team` picks members among existing agents and built-in profiles (closed list), `modules` picks the sections.
  */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const { name, description, what } = (await req.json()) as { name: string; description?: string; what: "team" | "modules" };
   const brief = `Projet « ${name} »${description ? ` : ${description}` : ""}`;
   try {
@@ -84,3 +85,5 @@ ${candidates.map((c) => `- ${c.label} : ${c.role}`).join("\n")}`,
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
+
+export const POST = withAccess("edit", handlePOST, { credits: true });

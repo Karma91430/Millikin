@@ -1,3 +1,4 @@
+import { allowedToolGroups } from "./access";
 import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
@@ -197,7 +198,10 @@ export async function runAgent(p: RunParams): Promise<string> {
     }
 
     const excluded = new Set(p.excludeTools ?? []);
-    for (const [def, impl] of buildTools({ ...p.ctx, agent })) {
+    // The user running this may be limited to some tool groups (admin space): the agent keeps only those.
+    const allowed = allowedToolGroups();
+    const toolAgent = allowed ? { ...agent, tools: (agent.tools ?? []).filter((t) => allowed.includes(t)) } : agent;
+    for (const [def, impl] of buildTools({ ...p.ctx, agent: toolAgent })) {
       if (excluded.has(def.function.name)) continue;
       tools.push(def);
       impls[def.function.name] = impl;

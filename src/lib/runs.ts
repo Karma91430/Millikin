@@ -1,5 +1,6 @@
 // Server-side run registry: a chat turn keeps running when the browser leaves the page.
 // Clients (re)attach with a snapshot of the trace, then receive live events.
+import { currentUserId } from "./db";
 import { applyEvent, emptyTrace, type Trace, type TraceEvent } from "./trace";
 
 export type RunStatus = "running" | "done" | "error" | "stopped";
@@ -11,6 +12,8 @@ export type Run = {
   targetId: string;
   title: string;
   userMessage: string;
+  /** Account that started the run (empty in single-user mode). */
+  userId?: string;
   startedAt: number;
   endedAt?: number;
   status: RunStatus;
@@ -40,12 +43,12 @@ export const activeRunFor = (conversationId: string) => [...runs.values()].find(
 
 /** Register a run and execute it in the background. `exec` must emit its events through `emit`. */
 export function startRun(
-  meta: Pick<Run, "id" | "conversationId" | "targetType" | "targetId" | "title" | "userMessage">,
+  meta: Pick<Run, "id" | "conversationId" | "targetType" | "targetId" | "title" | "userMessage"> & { userId?: string },
   exec: (emit: (ev: TraceEvent) => void, signal: AbortSignal, run: Run) => Promise<void>,
 ): Run {
   let resolveFinished!: () => void;
   const finished = new Promise<void>((r) => (resolveFinished = r));
-  const run: Run = { ...meta, startedAt: Date.now(), status: "running", trace: emptyTrace(), controller: new AbortController(), listeners: new Set(), finished };
+  const run: Run = { ...meta, userId: meta.userId ?? currentUserId(), startedAt: Date.now(), status: "running", trace: emptyTrace(), controller: new AbortController(), listeners: new Set(), finished };
   runs.set(run.id, run);
   const emit = (ev: TraceEvent) => {
     if (ev.type !== "conversation" && ev.type !== "done" && ev.type !== "snapshot") run.trace = applyEvent(run.trace, ev);

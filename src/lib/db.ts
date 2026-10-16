@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
@@ -65,6 +66,15 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, provider TEXT, model TEXT, agent_id TEXT,
   source TEXT, prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0,
   latency_ms INTEGER, status TEXT, error TEXT);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT DEFAULT '', password_hash TEXT NOT NULL,
+  role TEXT DEFAULT 'member', active INTEGER DEFAULT 1, tools TEXT DEFAULT '[]',
+  project_access TEXT DEFAULT 'all', project_ids TEXT DEFAULT '[]',
+  can_create_projects INTEGER DEFAULT 1, can_manage_agents INTEGER DEFAULT 0,
+  max_team_size INTEGER DEFAULT 0, max_projects INTEGER DEFAULT 0,
+  credits_monthly INTEGER DEFAULT 0, credits_bonus INTEGER DEFAULT 0,
+  created_at INTEGER, updated_at INTEGER, last_login INTEGER);
+CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER, expires_at INTEGER);
 `;
 
 // Columns added after the first release: [table, column, definition].
@@ -92,6 +102,9 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "attempts", "INTEGER DEFAULT 0"],
   ["tasks", "needs_human", "INTEGER DEFAULT 0"],
   ["projects", "modules", "TEXT DEFAULT '[]'"],
+  ["projects", "owner_id", "TEXT DEFAULT ''"],
+  ["usage_logs", "user_id", "TEXT DEFAULT ''"],
+  ["conversations", "user_id", "TEXT DEFAULT ''"],
   ["agents", "rag", "TEXT DEFAULT '{}'"],
 ];
 
@@ -188,6 +201,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   web_fallback: "on",
   /** Interface and agents' answer language: fr | en. */
   language: "fr",
+  /** Accept connections from other machines of the network (needs an admin account; server started with --hostname 0.0.0.0). */
+  network_access: "off",
+  /** Credit weight per provider type: credits = tokens / 1000 × weight. */
+  credit_weights: JSON.stringify({ ollama: 0.1, openai: 1, anthropic: 1, "claude-code": 1, codex: 1 }),
   /** Automatic relaunches of a rejected or failed task before asking a person (0 = off). */
   task_auto_retries: "5",
 };
@@ -222,7 +239,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     cols: ["name", "description", "lead_id", "member_ids", "workspace", "links", "entry_ids", "layout", "clarify", "concert"],
     order: "created_at",
   },
-  projects: { table: "projects", json: ["team", "resources", "modules"], bool: [], cols: ["name", "description", "path", "template_id", "team", "resources", "modules"], order: "updated_at DESC" },
+  projects: { table: "projects", json: ["team", "resources", "modules"], bool: [], cols: ["name", "description", "path", "template_id", "team", "resources", "modules", "owner_id"], order: "updated_at DESC" },
   tasks: {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
@@ -399,6 +416,11 @@ export type McpServer = {
 export type Provider = { id: string; slug: string; name: string; type: string; base_url: string; api_key: string; enabled: boolean };
 export type ModelRow = { id: string; provider_id: string; model: string; label: string; kind: string; supports_tools: boolean; enabled: boolean };
 
+// The user a model call is made for (set per request / run by access.ts), read when logging usage.
+const g2 = globalThis as unknown as { __millikinUserCtx?: AsyncLocalStorage<{ userId: string }> };
+export const userContext = () => (g2.__millikinUserCtx ??= new AsyncLocalStorage());
+export const currentUserId = () => userContext().getStore()?.userId ?? "";
+
 export function logUsage(u: {
   provider: string;
   model: string;
@@ -413,7 +435,7 @@ export function logUsage(u: {
 }) {
   db()
     .prepare(
-      "INSERT INTO usage_logs (ts, provider, model, agent_id, project_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO usage_logs (ts, provider, model, agent_id, project_id, user_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(now(), u.provider, u.model, u.agent_id ?? null, u.project_id ?? "", u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
+    .run(now(), u.provider, u.model, u.agent_id ?? null, u.project_id ?? "", currentUserId(), u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
 }

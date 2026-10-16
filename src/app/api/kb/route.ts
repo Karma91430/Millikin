@@ -1,3 +1,4 @@
+import { withAccess } from "@/lib/access";
 import { db } from "@/lib/db";
 import { addDocument, extractText, listDocuments, normTags, removeDocument, setDocumentTags } from "@/lib/rag";
 
@@ -8,7 +9,7 @@ export async function GET(req: Request) {
 }
 
 /** multipart (kbId + files + optional tags) or JSON { kbId, name, text, tags }. */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   try {
     if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
       const form = await req.formData();
@@ -34,15 +35,19 @@ export async function POST(req: Request) {
 }
 
 /** Update a document's tags. */
-export async function PATCH(req: Request) {
+async function handlePATCH(req: Request) {
   const { docId, tags } = (await req.json()) as { docId: string; tags: string[] };
   if (!docId) return Response.json({ error: "docId manquant" }, { status: 400 });
   return Response.json({ tags: setDocumentTags(docId, tags) });
 }
 
-export async function DELETE(req: Request) {
+async function handleDELETE(req: Request) {
   const docId = new URL(req.url).searchParams.get("docId");
   if (!docId) return Response.json({ error: "docId manquant" }, { status: 400 });
   removeDocument(docId);
   return Response.json({ ok: true });
 }
+
+export const POST = withAccess("agents", handlePOST, { credits: true });
+export const PATCH = withAccess("agents", handlePATCH, {});
+export const DELETE = withAccess("agents", handleDELETE, {});

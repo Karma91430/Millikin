@@ -1,7 +1,8 @@
+import { denied, guard, guardProject } from "@/lib/access";
 import { db, list, type Sprint, type Task } from "@/lib/db";
 
 /** Usage and delivery statistics for one project. */
-export async function GET(req: Request) {
+async function handleGET(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return Response.json({ error: "id manquant" }, { status: 400 });
   const d = db();
@@ -45,4 +46,14 @@ export async function GET(req: Request) {
     sprints,
     conversations: conversations.n,
   });
+}
+
+/** Read access to the project given in ?id=. */
+export async function GET(req: Request) {
+  try {
+    guardProject(guard(req, "read"), new URL(req.url).searchParams.get("id"));
+    return await handleGET(req);
+  } catch (e) {
+    return denied(e);
+  }
 }
