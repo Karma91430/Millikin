@@ -41,6 +41,7 @@ Sois concret et bref : c'est une discussion, pas un document.`;
 
 const PHASE_EXECUTION = `## Phase de réalisation (validée par l'utilisateur)
 1. Répartis le travail avec ask_agent : une consigne précise et autonome par membre (objectif, contraintes, fichiers attendus).
+   Quand plusieurs membres peuvent travailler indépendamment, sollicite-les EN MÊME TEMPS : plusieurs appels ask_agent dans la même réponse s'exécutent en parallèle. Enchaîne-les seulement si l'un a besoin du résultat de l'autre.
 2. Contrôle chaque résultat reçu : s'il est incomplet, faux ou hors sujet, redemande une correction au même membre en expliquant quoi corriger.
 3. Tiens le tableau à jour si tu en as l'outil.
 4. Consigne les décisions importantes (choix techniques, arbitrages) avec record_decision.
@@ -168,7 +169,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         function: {
           name: "ask_agent",
           description:
-            "Faire travailler un membre de l'équipe : il exécute la consigne (répondre, écrire du code, tester…) et te renvoie son résultat. C'est le SEUL moyen de faire agir un membre ; ajouter une carte au tableau ne le fait pas travailler.",
+            "Faire travailler un membre de l'équipe : il exécute la consigne (répondre, écrire du code, tester…) et te renvoie son résultat. C'est le SEUL moyen de faire agir un membre ; ajouter une carte au tableau ne le fait pas travailler. Plusieurs appels dans la même réponse s'exécutent en parallèle.",
           parameters: {
             type: "object",
             properties: {
