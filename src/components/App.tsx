@@ -1,6 +1,6 @@
 "use client";
 
-import { Blocks, Bot, CheckCircle2, FolderKanban, Library, Loader2, LogOut, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plug, Settings, ShieldCheck, Users, X, XCircle } from "lucide-react";
+import { Blocks, Bot, CheckCircle2, FolderKanban, Library, Loader2, LogOut, MessagesSquare, PanelLeftClose, Pin, Plug, Settings, ShieldCheck, Users, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { I18nProvider, useT, type Lang } from "@/i18n";
 import { api, useData, type Agent, type Meta, type Project, type RunInfo, type Team } from "./api";
@@ -68,6 +68,9 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
   const { t: tr } = useT();
   // Wide (icons + labels) on large screens unless the user collapsed it; always icons-only on small screens.
   const [navWide, toggleNav] = usePersistentFlag("millikin:nav-wide", true);
+  const [peek, setPeek] = useState(false);
+  // Labels show when the menu is peeked open, or pinned wide on a large screen ("hidden" would win over "block" if both were set).
+  const labelCls = peek ? "block" : navWide ? "hidden xl:block" : "hidden";
   // Rendered client-only (see ClientApp), so localStorage is safe in the initializer.
   const [view, setView] = useState<View>(() => {
     try {
@@ -147,10 +150,18 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
 
   return (
     <div className="flex h-screen min-h-0">
-      <nav className={cx("flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface-1 py-3 transition-[width]", navWide && "xl:w-52 xl:items-stretch xl:px-2")}>
-        <div className={cx("mb-3 flex items-center gap-2 px-1", navWide && "xl:px-2")}>
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">M</span>
-          <span className={cx("hidden text-sm font-semibold", navWide && "xl:block")}>Millikin</span>
+      {/* Collapsed menu: hovering opens it over the content, leaving closes it; the pin keeps it open. */}
+      <div className={cx("relative w-14 shrink-0", navWide && "xl:w-52")} onMouseEnter={() => setPeek(true)} onMouseLeave={() => setPeek(false)}>
+      <nav
+        className={cx(
+          "absolute inset-y-0 left-0 z-40 flex flex-col gap-1 border-r border-line bg-surface-1 py-3",
+          peek ? "w-52 items-stretch px-2" : navWide ? "w-14 items-center xl:w-52 xl:items-stretch xl:px-2" : "w-14 items-center",
+          peek && !navWide && "shadow-2xl shadow-black/50",
+        )}
+      >
+        <div className={cx("mb-3 flex items-center gap-2", peek ? "px-2" : navWide ? "px-1 xl:px-2" : "px-1")}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">M</span>
+          <span className={cx("text-sm font-semibold", labelCls)}>Millikin</span>
         </div>
         {NAV.filter((n) => n.id !== "admin" || isAdmin).map(({ id, label, icon: Icon }) => (
           <button
@@ -170,11 +181,11 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
                 </span>
               )}
             </span>
-            <span className={cx("hidden", navWide && "xl:block")}>{tr(label)}</span>
+            <span className={cx("whitespace-nowrap", labelCls)}>{tr(label)}</span>
           </button>
         ))}
         {running.length > 0 && (
-          <div className={cx("mt-4 hidden flex-col gap-1", navWide && "xl:flex")}>
+          <div className={cx("mt-4 flex-col gap-1", peek ? "flex" : navWide ? "hidden xl:flex" : "hidden")}>
             <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("En cours")}</div>
             {running.map((r) => (
               <button key={r.id} onClick={() => openRun(r)} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-fg-muted hover:bg-surface-2" title={r.title}>
@@ -187,25 +198,23 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
             ))}
           </div>
         )}
-        <div className={cx("mt-auto flex flex-col gap-2 px-1", navWide && "xl:px-2.5")}>
+        <div className={cx("mt-auto flex flex-col gap-2", peek ? "px-2.5" : navWide ? "px-1 xl:px-2.5" : "px-1")}>
           <button
-            onClick={toggleNav}
-            title={navWide ? tr("Réduire le menu") : tr("Agrandir le menu")}
-            aria-label={navWide ? tr("Réduire le menu") : tr("Agrandir le menu")}
-            className="hidden h-8 items-center gap-2.5 rounded-lg px-2.5 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg xl:flex"
+            onClick={() => (toggleNav(), setPeek(false))}
+            title={navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}
+            aria-label={navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}
+            className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg"
           >
-            {navWide ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-            {navWide && <span>{tr("Réduire le menu")}</span>}
+            {navWide ? <PanelLeftClose size={16} className="shrink-0" /> : <Pin size={16} className="shrink-0" />}
+            <span className={cx("whitespace-nowrap", labelCls)}>{navWide ? tr("Réduire le menu") : tr("Épingler le menu ouvert")}</span>
           </button>
           {me.user && (
-            <div className={cx("flex items-center gap-2 rounded-lg border border-line p-1.5", !navWide && "justify-center")} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
+            <div className={cx("flex items-center gap-2 rounded-lg border border-line p-1.5", !peek && !navWide && "justify-center")} title={`${me.user.name || me.user.email} · ${me.user.role}`}>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold">{(me.user.name || me.user.email).charAt(0).toUpperCase()}</span>
-              {navWide && (
-                <span className="hidden min-w-0 flex-1 xl:block">
-                  <span className="block truncate text-xs text-fg">{me.user.name || me.user.email}</span>
-                  {me.credits && me.credits.quota > 0 ? <CreditBar used={me.credits.used} quota={me.credits.quota} /> : <span className="block text-[10px] text-fg-subtle">{tr(me.user.role === "admin" ? "Administrateur" : me.user.role === "viewer" ? "Lecteur" : "Membre")}</span>}
-                </span>
-              )}
+              <span className={cx("min-w-0 flex-1", labelCls)}>
+                <span className="block truncate text-xs text-fg">{me.user.name || me.user.email}</span>
+                {me.credits && me.credits.quota > 0 ? <CreditBar used={me.credits.used} quota={me.credits.quota} /> : <span className="block text-[10px] text-fg-subtle">{tr(me.user.role === "admin" ? "Administrateur" : me.user.role === "viewer" ? "Lecteur" : "Membre")}</span>}
+              </span>
               <button
                 onClick={async () => {
                   await api("/api/auth/logout", { method: "POST" });
@@ -213,7 +222,7 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
                 }}
                 title={tr("Se déconnecter")}
                 aria-label={tr("Se déconnecter")}
-                className={cx("text-fg-subtle hover:text-fg", !navWide && "hidden")}
+                className={cx("text-fg-subtle hover:text-fg", labelCls)}
               >
                 <LogOut size={14} />
               </button>
@@ -221,6 +230,7 @@ function Workspace({ me, onAuthChange }: { me: Me; onAuthChange: () => void }) {
           )}
         </div>
       </nav>
+      </div>
 
       <main className="min-w-0 flex-1 overflow-hidden">
         {!agents.data || !teams.data ? (

@@ -25,6 +25,7 @@ export const app: Record<string, string> = {
   "OpenAI, Mistral, Groq, OpenRouter, LM Studio… avec une clé ou en local.": "OpenAI, Mistral, Groq, OpenRouter, LM Studio… with a key or locally.",
   "Claude via une clé API, facturé à l'usage.": "Claude through an API key, billed per use.",
   "Réduire le menu": "Collapse menu",
+  "Épingler le menu ouvert": "Pin the menu open",
   "Agrandir le menu": "Expand menu",
   "Espace de travail": "Workspace",
   Projets: "Projects",

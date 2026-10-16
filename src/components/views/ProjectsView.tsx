@@ -1,6 +1,6 @@
 "use client";
 
-import { Blocks, CalendarRange, Check, ChevronDown, ChevronRight, ChevronUp, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Sparkles, Square, Trash2, X } from "lucide-react";
+import { Blocks, CalendarRange, Check, ChevronDown, ChevronRight, ChevronUp, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Play, Plus, RefreshCw, RotateCcw, Sparkles, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
 import { hasModule, PROJECT_MODULES } from "@/lib/modules";
@@ -27,7 +27,7 @@ const PRIORITY: Record<Task["priority"], { label: string; color?: string }> = {
 };
 type Entry = { path: string; dir: boolean; size: number; mtime: number };
 type Workspace = { root: string; entries: Entry[] };
-type Tab = "overview" | "tasks" | "files" | "team" | "stats";
+type Tab = "overview" | "tasks" | "files" | "knowledge" | "team" | "stats";
 const POINTS = [0, 1, 2, 3, 5, 8, 13];
 
 const ago = (ms: number, t: (fr: string, vars?: Record<string, string | number>) => string, lang: string) => {
@@ -96,84 +96,95 @@ export function ProjectsView({
 
   const showCreate = creating || !!createFrom;
   const [listWide, toggleList] = usePersistentFlag("millikin:projects-list-wide", true);
+  // Collapsed list: hovering the rail opens it over the content; leaving closes it, the pin keeps it open.
+  const [peekList, setPeekList] = useState(false);
 
   return (
     <div className="flex h-full min-h-0">
-      {/* project sub-menu: full list, or a thin rail of initials when collapsed */}
-      {!listWide ? (
-        <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-line py-3">
-          <Button size="sm" variant="ghost" onClick={toggleList} title={t("Afficher la liste des projets")} aria-label={t("Afficher la liste des projets")}>
-            <PanelLeftOpen size={15} />
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")} aria-label={t("Nouveau projet")}>
-            <FolderPlus size={15} />
-          </Button>
-          <div className="my-1 h-px w-6 bg-line" />
-          <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
-            {list.map((p) => {
-              const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => onSelect(p.id)}
-                  title={p.name}
-                  className={cx(
-                    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
-                    p.id === project?.id ? "bg-accent/20 text-fg" : "bg-surface-2 text-fg-muted hover:text-fg",
-                  )}
-                >
-                  {p.name.trim().charAt(0).toUpperCase()}
-                  {busy && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-accent" />}
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-      ) : (
-        <aside className="flex w-64 shrink-0 flex-col border-r border-line">
-          <div className="flex items-center justify-between px-4 pb-2 pt-4">
-            <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
-            <span className="flex">
-              <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
-                <FolderPlus size={15} />
-              </Button>
-              <Button size="sm" variant="ghost" onClick={toggleList} title={t("Masquer la liste des projets")} aria-label={t("Masquer la liste des projets")}>
-                <PanelLeftClose size={15} />
-              </Button>
-            </span>
-          </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-3">
-            {list.map((p) => {
-              const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
-              const done = mine.filter((x) => x.status === "done").length;
-              const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
-              return (
-                <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
-                  <div className="flex items-center gap-2">
-                    <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
-                    {busy && <Loader2 size={13} className="animate-spin text-accent" />}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
-                    <span>
-                      {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
-                    </span>
-                    {mine.length > 0 && (
-                      <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
-                        <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
-                      </span>
+      {/* project sub-menu: full list, or a thin rail of initials when collapsed (hover opens it over the content) */}
+      <div className={cx("relative h-full shrink-0", listWide ? "w-64" : "w-12")} onMouseEnter={() => !listWide && setPeekList(true)} onMouseLeave={() => setPeekList(false)}>
+        {!listWide && (
+          <aside className="flex h-full w-12 flex-col items-center gap-1 border-r border-line py-3">
+            <Button size="sm" variant="ghost" onClick={toggleList} title={t("Épingler la liste des projets")} aria-label={t("Épingler la liste des projets")}>
+              <PanelLeftOpen size={15} />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")} aria-label={t("Nouveau projet")}>
+              <FolderPlus size={15} />
+            </Button>
+            <div className="my-1 h-px w-6 bg-line" />
+            <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
+              {list.map((p) => {
+                const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => onSelect(p.id)}
+                    title={p.name}
+                    className={cx(
+                      "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
+                      p.id === project?.id ? "bg-accent/20 text-fg" : "bg-surface-2 text-fg-muted hover:text-fg",
                     )}
-                  </div>
+                  >
+                    {p.name.trim().charAt(0).toUpperCase()}
+                    {busy && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-accent" />}
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+        {(listWide || peekList) && (
+          <aside className={cx("flex h-full w-64 flex-col border-r border-line bg-surface-0", !listWide && "absolute inset-y-0 left-0 z-30 shadow-2xl shadow-black/50")}>
+            <div className="flex items-center justify-between px-4 pb-2 pt-4">
+              <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{t("Projets")}</span>
+              <span className="flex">
+                <Button size="sm" variant="ghost" onClick={() => setCreating(true)} title={t("Nouveau projet")}>
+                  <FolderPlus size={15} />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => (toggleList(), setPeekList(false))}
+                  title={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
+                  aria-label={listWide ? t("Masquer la liste des projets") : t("Épingler la liste des projets")}
+                >
+                  {listWide ? <PanelLeftClose size={15} /> : <Pin size={15} />}
+                </Button>
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 pb-3">
+              {list.map((p) => {
+                const mine = (tasks.data ?? []).filter((x) => x.project_id === p.id);
+                const done = mine.filter((x) => x.status === "done").length;
+                const busy = runs.some((r) => r.status === "running" && r.targetId === p.id);
+                return (
+                  <button key={p.id} onClick={() => onSelect(p.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2.5 text-left", p.id === project?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 truncate text-sm font-medium">{p.name}</span>
+                      {busy && <Loader2 size={13} className="animate-spin text-accent" />}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-fg-subtle">
+                      <span>
+                        {mine.length > 1 ? t("{n} tâches", { n: mine.length }) : t("{n} tâche", { n: mine.length })}
+                      </span>
+                      {mine.length > 0 && (
+                        <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+                          <span className="block h-full bg-emerald-500" style={{ width: `${(done / mine.length) * 100}%` }} />
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+              {!list.length && projects && (
+                <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
+                  {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
                 </button>
-              );
-            })}
-            {!list.length && projects && (
-              <button onClick={() => setCreating(true)} className="w-full rounded-lg border border-dashed border-line p-3 text-left text-xs text-fg-muted hover:border-line-strong">
-                {t("Aucun projet. Crée le premier à partir d'un modèle d'équipe.")}
-              </button>
-            )}
-          </div>
-        </aside>
-      )}
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
       {project ? (
         <ProjectDetail
@@ -475,7 +486,7 @@ function ProjectDetail({
   const [editModules, setEditModules] = useState(false);
   const has = (id: Parameters<typeof hasModule>[1]) => hasModule(project, id);
   // A tab whose module was turned off falls back to the overview.
-  const tab: Tab = (tabState === "tasks" && !has("board")) || (tabState === "files" && !has("files")) || (tabState === "stats" && !has("stats")) ? "overview" : tabState;
+  const tab: Tab = (tabState === "tasks" && !has("board")) || (tabState === "files" && !has("files")) || (tabState === "knowledge" && !has("knowledge")) || (tabState === "stats" && !has("stats")) ? "overview" : tabState;
   const [openFile, setOpenFile] = useState<string | null>(null);
   const ws = useData<Workspace>(`/api/workspace?projectId=${project.id}`);
   const { copied, copy } = useCopy();
@@ -607,6 +618,7 @@ function ProjectDetail({
               ["overview", t("Vue d'ensemble"), true],
               ["tasks", t("Tâches ({n})", { n: tasks.length }), has("board")],
               ["files", t("Fichiers ({n})", { n: ws.data?.entries.filter((e) => !e.dir).length ?? 0 }), has("files")],
+              ["knowledge", t("Connaissances et MCP"), has("knowledge")],
               ["team", t("Équipe ({n})", { n: people.length }), true],
               ["stats", t("Stats"), has("stats")],
             ] as const
@@ -656,7 +668,8 @@ function ProjectDetail({
         )}
         {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
-        {tab === "team" && <TeamTab project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
+        {tab === "knowledge" && <ProjectResourcesPanel key={project.id} project={project} agents={agents} onSaved={reloadProjects} />}
+        {tab === "team" && <ProjectTeam project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
       </div>
     </div>
   );
@@ -695,33 +708,6 @@ function ModulesEditor({ project, onClose, onSaved }: { project: Project; onClos
         <p className="text-[11px] text-fg-subtle">{t("Désactiver un module masque son onglet ; les données (tâches, fichiers, décisions) sont conservées.")}</p>
       </div>
     </Modal>
-  );
-}
-
-/** Team tab: the project's own team composition, and the resources each member may use. */
-function TeamTab(props: { project: Project; agents: Agent[]; onSaved: () => void; onAgentsChange: () => void }) {
-  const { t } = useT();
-  const [subState, setSub] = useState<"composition" | "resources">("composition");
-  const resourcesOn = hasModule(props.project, "knowledge");
-  const sub = resourcesOn ? subState : "composition";
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex gap-1 px-6 pt-4">
-        {(
-          [
-            ["composition", t("Composition"), true],
-            ["resources", t("Ressources (connaissances & MCP)"), resourcesOn],
-          ] as const
-        )
-          .filter(([, , on]) => on)
-          .map(([id, label]) => (
-          <button key={id} onClick={() => setSub(id)} className={cx("rounded-lg px-3 py-1 text-sm", sub === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {sub === "composition" ? <ProjectTeam {...props} /> : <ProjectResourcesPanel key={props.project.id} project={props.project} agents={props.agents} onSaved={props.onSaved} />}
-    </div>
   );
 }
 
