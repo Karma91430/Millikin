@@ -1,4 +1,8 @@
 export const projects: Record<string, string> = {
+  "Masquer les détails": "Hide details",
+  "Afficher les détails (description, équipe, dossier)": "Show details (description, team, folder)",
+  "Moins": "Less",
+  "Détails": "Details",
   "Fiche du projet": "Project sheet",
   "Le nom du projet est obligatoire": "The project name is required",
   "Objectif, utilisateurs, contraintes : les agents la lisent avant de travailler sur le projet.": "Goal, users, constraints: the agents read it before working on the project.",
