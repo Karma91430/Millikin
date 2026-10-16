@@ -1,5 +1,5 @@
-import { getSettings, logUsage } from "./db";
-import { ollamaBase, ollamaHeaders, resolveModel } from "./gateway";
+import { getSettings, logUsage, newId } from "./db";
+import { chatStream, ollamaBase, ollamaHeaders, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 
 export function checkProxyAuth(req: Request): Response | null {
   const key = getSettings().proxy_key;
@@ -25,9 +25,17 @@ export async function forward(req: Request, endpoint: "chat/completions" | "embe
   const log = (status: "ok" | "error", u?: { prompt_tokens?: number; completion_tokens?: number }, error?: string) =>
     logUsage({ provider: res.provider.slug, model: res.model, source: "proxy", ...u, latency_ms: Date.now() - started, status, error });
 
-  const upstream = await fetch(`${ollamaBase(res.provider)}/v1/${endpoint}`, {
+  const type = res.provider.type;
+  if (type !== "ollama" && type !== "openai") {
+    if (endpoint === "embeddings") return Response.json({ error: { message: `${res.provider.name} ne fournit pas d'embeddings` } }, { status: 400 });
+    return viaGateway(body, res.ref, !!payload.stream, req.signal);
+  }
+  // Ollama exposes /v1; an OpenAI-compatible provider's base URL already ends with /v1.
+  const url = type === "openai" ? `${res.provider.base_url.replace(/\/+$/, "")}/${endpoint}` : `${ollamaBase(res.provider)}/v1/${endpoint}`;
+  const headers = type === "openai" ? { "content-type": "application/json", ...(res.provider.api_key ? { authorization: `Bearer ${res.provider.api_key}` } : {}) } : ollamaHeaders(res.provider);
+  const upstream = await fetch(url, {
     method: "POST",
-    headers: ollamaHeaders(res.provider),
+    headers,
     body: JSON.stringify(payload),
     signal: req.signal,
   }).catch((e) => e as Error);
@@ -67,4 +75,30 @@ export async function forward(req: Request, endpoint: "chat/completions" | "embe
   return new Response(upstream.body.pipeThrough(sniff), {
     headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" },
   });
+}
+
+/** Providers without an OpenAI endpoint (Anthropic, Claude Code, Codex): run through the gateway and answer in OpenAI format. */
+async function viaGateway(body: Record<string, unknown>, ref: string, stream: boolean, signal: AbortSignal) {
+  const id = `chatcmpl-${newId()}`;
+  const created = Math.floor(Date.now() / 1000);
+  try {
+    const r = await chatStream({
+      ref,
+      messages: (body.messages ?? []) as ChatMessage[],
+      tools: body.tools as ToolDef[] | undefined,
+      temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+      signal,
+      source: "proxy",
+    });
+    const message = { role: "assistant", content: r.content || null, ...(r.toolCalls.length ? { tool_calls: r.toolCalls } : {}) };
+    const finish = r.toolCalls.length ? "tool_calls" : "stop";
+    const usage = { ...r.usage, total_tokens: r.usage.prompt_tokens + r.usage.completion_tokens };
+    if (!stream) return Response.json({ id, object: "chat.completion", created, model: ref, choices: [{ index: 0, message, finish_reason: finish }], usage });
+    const chunk = (delta: object, finish_reason: string | null, extra = {}) => `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model: ref, choices: [{ index: 0, delta, finish_reason }], ...extra })}\n\n`;
+    const tools = r.toolCalls.map((tc, index) => ({ index, ...tc }));
+    const sse = chunk({ role: "assistant", content: r.content, ...(tools.length ? { tool_calls: tools } : {}) }, null) + chunk({}, finish, { usage }) + "data: [DONE]\n\n";
+    return new Response(sse, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+  } catch (e) {
+    return Response.json({ error: { message: e instanceof Error ? e.message : String(e) } }, { status: 502 });
+  }
 }

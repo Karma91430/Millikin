@@ -3,7 +3,7 @@
 import { Download, Play, Plus, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/i18n";
-import { api, crud, formatBytes, useData, type Provider } from "../api";
+import { api, crud, formatBytes, useData, type Meta, type Provider } from "../api";
 import { Badge, Button, Card, cx, ErrorNote, Field, Input, PageHeader } from "../ui";
 
 type Installed = { name: string; size: number; family?: string; parameter_size?: string; quantization?: string; capabilities: string[] };
@@ -28,19 +28,19 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
   const [tab, setTab] = useState<"models" | "usage" | "hosts" | "proxy">("models");
   const providers = useData<Provider[]>("/api/crud/providers");
   const [host, setHost] = useState<string>("");
-  const hostId = host || providers.data?.find((p) => p.enabled)?.id || "";
+  const hostId = host || providers.data?.find((p) => p.enabled && p.type === "ollama")?.id || "";
   return (
     <div>
       <PageHeader
         title={t("Modèles")}
-        subtitle={t("Tout tourne en local sur Ollama. Millikin suit chaque appel et expose un proxy compatible OpenAI.")}
+        subtitle={t("Ollama en local par défaut, ou le fournisseur de ton choix. Millikin suit chaque appel et expose un proxy compatible OpenAI.")}
         actions={
           <div className="flex rounded-lg border border-line p-0.5">
             {(
               [
                 ["models", "Modèles"],
                 ["usage", "Utilisation"],
-                ["hosts", "Hôtes Ollama"],
+                ["hosts", "Fournisseurs"],
                 ["proxy", "Proxy API"],
               ] as const
             ).map(([id, label]) => (
@@ -52,9 +52,9 @@ export function ModelsView({ onChange }: { onChange: () => void }) {
         }
       />
       <div className="p-6">
-        {tab === "models" && hostId && <Models hostId={hostId} providers={providers.data ?? []} onHost={setHost} onChange={onChange} />}
+        {tab === "models" && hostId && <Models hostId={hostId} providers={(providers.data ?? []).filter((p) => p.type === "ollama")} onHost={setHost} onChange={onChange} />}
         {tab === "usage" && <Usage />}
-        {tab === "hosts" && <Hosts providers={providers.data ?? []} reload={() => (providers.reload(), onChange())} />}
+        {tab === "hosts" && <Providers providers={providers.data ?? []} reload={() => (providers.reload(), onChange())} />}
         {tab === "proxy" && <Proxy />}
       </div>
     </div>
@@ -420,75 +420,132 @@ function Usage() {
   );
 }
 
-function Hosts({ providers, reload }: { providers: Provider[]; reload: () => void }) {
+const TYPE_LABEL: Record<string, string> = { ollama: "Ollama", openai: "Compatible OpenAI", anthropic: "Anthropic", "claude-code": "CLI Claude Code", codex: "CLI Codex" };
+const GROUPS: [string, string][] = [
+  ["local", "Local et privé"],
+  ["cli", "Abonnement via CLI"],
+  ["cloud", "API cloud (clé)"],
+];
+
+/** Model providers: local Ollama hosts, OpenAI-compatible or Anthropic APIs, and the Claude Code / Codex CLIs. */
+function Providers({ providers, reload }: { providers: Provider[]; reload: () => void }) {
   const { t } = useT();
-  const [draft, setDraft] = useState({ slug: "", name: "", base_url: "http://192.168.1.10:11434" });
-  const [msg, setMsg] = useState<string>();
+  const meta = useData<Meta>("/api/meta");
+  const presets = meta.data?.presets ?? {};
+  const [draft, setDraft] = useState<{ preset: string; slug: string; name: string; type: string; base_url: string; api_key: string } | null>(null);
+  const [status, setStatus] = useState<Record<string, { ok: boolean; text: string } | "busy">>({});
+  const test = async (p: Provider) => {
+    setStatus((x) => ({ ...x, [p.id]: "busy" }));
+    const r = await api<{ ok: boolean; detail?: string; error?: string }>("/api/providers/test", { method: "POST", json: { providerId: p.id } }).catch((e): { ok: boolean; detail?: string; error?: string } => ({ ok: false, error: String(e.message) }));
+    setStatus((x) => ({ ...x, [p.id]: { ok: r.ok, text: r.ok ? (r.detail ?? "ok") : (r.error ?? "") } }));
+    reload();
+  };
+  const pick = (key: string) => {
+    const pr = presets[key];
+    const base = key.replace(/[^a-z0-9-]/g, "");
+    let slug = base;
+    for (let i = 2; providers.some((p) => p.slug === slug); i++) slug = `${base}-${i}`;
+    setDraft({ preset: key, slug, name: pr.name, type: pr.type, base_url: pr.base_url, api_key: "" });
+  };
   return (
-    <div className="flex max-w-3xl flex-col gap-3">
+    <div className="flex max-w-4xl flex-col gap-4">
       <p className="text-sm text-fg-muted">
-        {t("Un hôte = une instance Ollama. Ajoute une autre machine du réseau (ex : un PC avec GPU) pour y faire tourner de plus gros modèles.")}
+        {t("Millikin fonctionne avec le moteur de ton choix : modèles locaux Ollama, ton abonnement Claude Code ou Codex, ou une API cloud. Ajoute un fournisseur, synchronise ses modèles, puis choisis le modèle par défaut en bas du menu ou dans Réglages.")}
       </p>
-      {providers.map((p) => (
-        <Card key={p.id} className="flex flex-wrap items-center gap-3 p-3">
-          <span className={cx("h-2 w-2 rounded-full", p.enabled ? "bg-emerald-400" : "bg-fg-subtle")} />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">
-              {p.name} <span className="font-mono text-xs text-fg-subtle">({p.slug})</span>
+      {providers.map((p) => {
+        const st = status[p.id];
+        return (
+          <Card key={p.id} className="flex flex-wrap items-center gap-3 p-3">
+            <span className={cx("h-2 w-2 rounded-full", p.enabled ? "bg-emerald-400" : "bg-fg-subtle")} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {p.name} <span className="font-mono text-xs text-fg-subtle">({p.slug})</span>
+                <Badge>{t(TYPE_LABEL[p.type] ?? p.type)}</Badge>
+              </div>
+              <div className="font-mono text-xs text-fg-muted">
+                {p.base_url}
+                {p.api_key ? ` · ${t("clé")} ••••${p.api_key.slice(-4)}` : ""}
+              </div>
+              {st && st !== "busy" && <div className={cx("mt-1 text-xs", st.ok ? "text-emerald-400" : "text-red-400")}>{st.text}</div>}
             </div>
-            <div className="font-mono text-xs text-fg-muted">{p.base_url}</div>
+            <Button size="sm" onClick={() => test(p)} disabled={st === "busy"}>
+              <RefreshCw size={13} className={st === "busy" ? "animate-spin" : undefined} /> {t("Tester et synchroniser")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={async () => (await crud.save("providers", { id: p.id, enabled: !p.enabled }), reload())}>
+              {p.enabled ? t("Désactiver") : t("Activer")}
+            </Button>
+            {providers.length > 1 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  if (!confirm(t("Retirer le fournisseur {name} ?", { name: p.name }))) return;
+                  await crud.remove("providers", p.id);
+                  reload();
+                }}
+              >
+                <Trash2 size={13} />
+              </Button>
+            )}
+          </Card>
+        );
+      })}
+
+      <div className="text-sm font-semibold">{t("Ajouter un fournisseur")}</div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {GROUPS.map(([g, label]) => (
+          <div key={g} className="flex flex-col gap-1.5">
+            <div className="text-xs text-fg-muted">{t(label)}</div>
+            {Object.entries(presets)
+              .filter(([, pr]) => pr.group === g)
+              .map(([key, pr]) => (
+                <button
+                  key={key}
+                  onClick={() => pick(key)}
+                  className={cx("rounded-lg border px-3 py-2 text-left hover:border-line-strong", draft?.preset === key ? "border-accent bg-accent/10" : "border-line bg-surface-1")}
+                >
+                  <div className="text-sm font-medium">{pr.name}</div>
+                  <div className="text-[11px] text-fg-subtle">{t(pr.hint)}</div>
+                </button>
+              ))}
           </div>
-          <Button
-            size="sm"
-            onClick={async () => {
-              const r = await api<{ total?: number }>("/api/ollama", { method: "POST", json: { action: "sync", providerId: p.id } }).catch((e) => ({ error: String(e.message) }));
-              setMsg("error" in r ? `${p.name} : ${r.error}` : t("{name} : {n} modèles synchronisés", { name: p.name, n: r.total ?? 0 }));
-              reload();
-            }}
-          >
-            <RefreshCw size={13} /> {t("Synchroniser")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={async () => (await crud.save("providers", { id: p.id, enabled: !p.enabled }), reload())}>
-            {p.enabled ? t("Désactiver") : t("Activer")}
-          </Button>
-          {providers.length > 1 && (
+        ))}
+      </div>
+      {draft && (
+        <Card className="grid gap-2 p-3 sm:grid-cols-2">
+          <Field label={t("Identifiant")} hint={t("Préfixe des modèles : {slug}/nom-du-modèle", { slug: draft.slug || "id" })}>
+            <Input value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} />
+          </Field>
+          <Field label={t("Nom")}>
+            <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </Field>
+          <Field label={draft.type === "claude-code" || draft.type === "codex" ? t("Commande") : "URL"}>
+            <Input value={draft.base_url} onChange={(e) => setDraft({ ...draft, base_url: e.target.value })} />
+          </Field>
+          {presets[draft.preset]?.needsKey && (
+            <Field label={t("Clé API")} hint={t("Stockée uniquement dans la base locale de Millikin.")}>
+              <Input type="password" value={draft.api_key} onChange={(e) => setDraft({ ...draft, api_key: e.target.value })} placeholder="sk-…" />
+            </Field>
+          )}
+          <div className="flex items-end justify-end gap-2 sm:col-span-2">
+            <Button variant="ghost" onClick={() => setDraft(null)}>
+              {t("Annuler")}
+            </Button>
             <Button
-              size="sm"
-              variant="ghost"
+              variant="primary"
+              disabled={!draft.slug || !draft.name || (presets[draft.preset]?.needsKey && !draft.api_key)}
               onClick={async () => {
-                if (!confirm(t("Retirer l'hôte {name} ?", { name: p.name }))) return;
-                await crud.remove("providers", p.id);
+                const p = await crud.save<Provider>("providers", { slug: draft.slug, name: draft.name, type: draft.type, base_url: draft.base_url, api_key: draft.api_key, enabled: true });
+                setDraft(null);
                 reload();
+                test(p);
               }}
             >
-              <Trash2 size={13} />
+              <Plus size={14} /> {t("Ajouter et tester")}
             </Button>
-          )}
+          </div>
         </Card>
-      ))}
-      {msg && <div className="text-sm text-fg-muted">{msg}</div>}
-      <Card className="grid gap-2 p-3 sm:grid-cols-[120px_1fr_1.4fr_auto] sm:items-end">
-        <Field label={t("Identifiant")}>
-          <Input value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="gpu" />
-        </Field>
-        <Field label={t("Nom")}>
-          <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="PC GPU" />
-        </Field>
-        <Field label="URL">
-          <Input value={draft.base_url} onChange={(e) => setDraft({ ...draft, base_url: e.target.value })} />
-        </Field>
-        <Button
-          variant="primary"
-          disabled={!draft.slug || !draft.name}
-          onClick={async () => {
-            await crud.save("providers", { ...draft, type: "ollama", enabled: true, api_key: "" });
-            setDraft({ slug: "", name: "", base_url: "http://192.168.1.10:11434" });
-            reload();
-          }}
-        >
-          <Plus size={14} /> {t("Ajouter")}
-        </Button>
-      </Card>
+      )}
     </div>
   );
 }

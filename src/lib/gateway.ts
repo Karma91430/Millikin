@@ -1,6 +1,10 @@
-// Local-only gateway: every model runs on an Ollama host, reached through Ollama's native API
-// (native /api/chat lets us set num_ctx and toggle thinking, which the OpenAI-compatible endpoint does not).
+// Model gateway. Ollama (the default, local) is reached through its native API, which lets us set
+// num_ctx and toggle thinking; other providers (OpenAI-compatible, Anthropic, Claude Code, Codex) go
+// through the adapters in providers.ts with the same contract: streamed text, tool calls, usage.
 import { db, getSettings, list, logUsage, newId, type ModelRow, type Provider } from "./db";
+import { anthropicChat, cliChat, listProviderModels, openaiChat, openaiEmbed, PROVIDER_PRESETS } from "./providers";
+
+export { PROVIDER_PRESETS };
 
 export type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 export type ChatMessage =
@@ -10,10 +14,6 @@ export type ChatMessage =
 export type ToolDef = { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } };
 export type Usage = { prompt_tokens: number; completion_tokens: number };
 
-export const PROVIDER_PRESETS: Record<string, { name: string; base_url: string; needsKey: boolean }> = {
-  ollama: { name: "Ollama local", base_url: "http://127.0.0.1:11434", needsKey: false },
-  "ollama-remote": { name: "Ollama distant (machine GPU du réseau)", base_url: "http://192.168.1.10:11434", needsKey: false },
-};
 
 export type Resolved = { provider: Provider; model: string; row?: ModelRow; ref: string };
 
@@ -30,7 +30,7 @@ export function resolveModel(ref?: string | null, kind: "chat" | "embedding" = "
     provider = row ? providers.find((p) => p.id === row.provider_id) : providers.find((p) => p.enabled);
     model = row ? row.model : r;
   }
-  if (!provider) throw new Error(`Aucun hôte Ollama configuré pour le modèle « ${r} »`);
+  if (!provider) throw new Error(`Aucun fournisseur configuré pour le modèle « ${r} »`);
   if (!provider.enabled) throw new Error(`L'hôte « ${provider.name} » est désactivé`);
   const row = db().prepare("SELECT * FROM models WHERE provider_id = ? AND model = ?").get(provider.id, model) as ModelRow | undefined;
   return {
@@ -54,6 +54,7 @@ const g = globalThis as unknown as { __millikinCaps?: Map<string, string[]> };
 const capsCache = (g.__millikinCaps ??= new Map());
 
 export async function capabilities(p: Provider, model: string): Promise<string[]> {
+  if (p.type !== "ollama") return ["completion", "tools"];
   const key = `${p.id}:${model}`;
   const hit = capsCache.get(key);
   if (hit) return hit;
@@ -155,6 +156,7 @@ export async function chatStream(opts: {
 }): Promise<StreamResult> {
   const res = resolveModel(opts.ref);
   const s = getSettings();
+  if (res.provider.type !== "ollama") return otherChat(res, opts);
   const caps = await capabilities(res.provider, res.model);
   const started = Date.now();
 
@@ -276,6 +278,27 @@ export async function chatStream(opts: {
   }
 }
 
+/** Non-Ollama providers: same contract (streamed text, tool calls, usage), plus the text tool-call fallback. */
+async function otherChat(res: Resolved, opts: Parameters<typeof chatStream>[0]): Promise<StreamResult> {
+  const started = Date.now();
+  const o = { model: res.model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, schema: opts.schema, json: opts.json, signal: opts.signal, onText: opts.onText };
+  const log = (extra: Record<string, unknown>) =>
+    logUsage({ provider: res.provider.slug, model: res.model, agent_id: opts.agentId, project_id: opts.projectId, source: opts.source ?? "agent", latency_ms: Date.now() - started, ...extra } as Parameters<typeof logUsage>[0]);
+  try {
+    const type = res.provider.type;
+    const r = type === "openai" ? await openaiChat(res.provider, o) : type === "anthropic" ? await anthropicChat(res.provider, o) : await cliChat(res.provider, o);
+    log({ ...r.usage, status: "ok" });
+    if (!r.toolCalls.length && opts.tools?.length && r.content.includes("<tool_call>")) {
+      const { calls, rest } = extractTextToolCalls(r.content, opts.tools.map((t) => t.function.name));
+      if (calls.length) return { ...r, content: rest, toolCalls: calls };
+    }
+    return r;
+  } catch (e) {
+    if (!opts.signal?.aborted) log({ status: "error", error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
 /** Non-streaming helper for JSON generation (thinking off: faster, and cleaner JSON). */
 export async function complete(opts: { ref?: string | null; messages: ChatMessage[]; json?: boolean; schema?: Record<string, unknown>; source?: string; temperature?: number }) {
   const r = await chatStream({ ...opts, think: "off", source: opts.source ?? "generator" });
@@ -287,6 +310,21 @@ export async function embed(texts: string[], ref?: string | null): Promise<numbe
   const out: number[][] = [];
   const started = Date.now();
   let tokens = 0;
+  if (res.provider.type !== "ollama") {
+    if (res.provider.type !== "openai") throw new Error(`${res.provider.name} ne fournit pas d'embeddings : choisis un modèle d'embedding Ollama ou compatible OpenAI dans Réglages.`);
+    try {
+      for (let i = 0; i < texts.length; i += 64) {
+        const r = await openaiEmbed(res.provider, res.model, texts.slice(i, i + 64));
+        tokens += r.tokens;
+        out.push(...r.vectors);
+      }
+      logUsage({ provider: res.provider.slug, model: res.model, source: "embedding", prompt_tokens: tokens, latency_ms: Date.now() - started, status: "ok" });
+      return out;
+    } catch (e) {
+      logUsage({ provider: res.provider.slug, model: res.model, source: "embedding", latency_ms: Date.now() - started, status: "error", error: String(e) });
+      throw e;
+    }
+  }
   try {
     for (let i = 0; i < texts.length; i += 32) {
       const r = await fetch(`${ollamaBase(res.provider)}/api/embed`, {
@@ -313,6 +351,17 @@ export async function embed(texts: string[], ref?: string | null): Promise<numbe
 
 /** Sync the catalog with the models installed on an Ollama host. */
 export async function discoverModels(p: Provider): Promise<{ added: number; total: number }> {
+  if (p.type !== "ollama") {
+    const found = await listProviderModels(p);
+    const ins = db().prepare("INSERT INTO models (id, provider_id, model, label, kind, supports_tools, enabled) VALUES (?,?,?,?,?,1,1) ON CONFLICT(provider_id, model) DO UPDATE SET kind = excluded.kind");
+    let added = 0;
+    for (const m of found) {
+      const before = db().prepare("SELECT 1 FROM models WHERE provider_id = ? AND model = ?").get(p.id, m.model);
+      ins.run(newId(), p.id, m.model, "", m.kind);
+      if (!before) added++;
+    }
+    return { added, total: found.length };
+  }
   const r = await fetch(`${ollamaBase(p)}/api/tags`, { headers: ollamaHeaders(p) });
   if (!r.ok) throw new Error(`${p.name} ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const ids = (((await r.json()) as { models?: { name: string }[] }).models ?? []).map((m) => m.name);

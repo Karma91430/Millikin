@@ -111,7 +111,7 @@ export type Message = { id: string; role: "user" | "assistant"; agent_id: string
 export type Meta = {
   tools: { id: string; label: string; description: string; danger: boolean }[];
   models: { ref: string; label: string; provider: string; kind: string; supports_tools: boolean }[];
-  presets: Record<string, { name: string; base_url: string }>;
+  presets: Record<string, { type: string; name: string; base_url: string; needsKey: boolean; group: "local" | "cloud" | "cli"; hint: string }>;
 };
 
 export async function api<T = unknown>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {

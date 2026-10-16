@@ -7,7 +7,7 @@ export async function GET() {
   const hardware = await detectHardware();
   const s = getSettings();
   const numCtx = Number(s.num_ctx) || 16384;
-  const p = list<Provider>("providers").find((x) => x.enabled);
+  const p = list<Provider>("providers").find((x) => x.enabled && x.type === "ollama");
   let installed: { name: string; size: number; parameter_size?: string }[] = [];
   let loaded: { name: string; size: number; size_vram: number }[] = [];
   let version: string | undefined;
