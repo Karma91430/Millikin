@@ -1,6 +1,6 @@
 "use client";
 
-import { Blocks, CalendarRange, Check, ChevronRight, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Sparkles, Square, Trash2, X } from "lucide-react";
+import { Blocks, CalendarRange, Check, ChevronDown, ChevronRight, ChevronUp, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Sparkles, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
 import { hasModule, PROJECT_MODULES } from "@/lib/modules";
@@ -494,31 +494,53 @@ function ProjectDetail({
 
   const root = ws.data?.root ?? project.path;
   const showFile = (p: string) => (setOpenFile(p), setTab("files"));
+  // Compact header by default (one line + tabs); details (description, team, folder) on demand.
+  const [details, toggleDetails] = usePersistentFlag("millikin:project-header-details", false);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="border-b border-line px-6 pb-0 pt-4">
+      <div className={cx("border-b border-line px-6 pb-0", details ? "pt-4" : "pt-2.5")}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold">{project.name}</h1>
+              <h1 className={cx("truncate font-semibold", details ? "text-lg" : "text-base")}>{project.name}</h1>
               {busy && (
                 <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
                   <Loader2 size={11} className="animate-spin" /> {t("l'équipe travaille")}
                 </span>
               )}
-            </div>
-            {project.description && <div className="mt-0.5 max-w-2xl text-sm text-fg-muted">{project.description}</div>}
-            <div className="mt-1.5 flex items-center -space-x-1.5">
-              {people.map((a) => (
-                <span key={a.id} title={`${a.name} — ${a.role}${spec.entry_ids.includes(a.id) ? ` (${t("premier contact")})` : ""}`}>
-                  <Avatar emoji={a.emoji} color={a.color} size={24} />
+              {!details && (
+                <span className="hidden items-center -space-x-1.5 md:flex">
+                  {people.slice(0, 8).map((a) => (
+                    <span key={a.id} title={`${a.name} — ${a.role}`}>
+                      <Avatar emoji={a.emoji} color={a.color} size={20} />
+                    </span>
+                  ))}
                 </span>
-              ))}
+              )}
+              <button
+                onClick={toggleDetails}
+                className="flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs text-fg-subtle hover:bg-surface-2 hover:text-fg"
+                title={details ? t("Masquer les détails") : t("Afficher les détails (description, équipe, dossier)")}
+                aria-expanded={details}
+              >
+                {details ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {details ? t("Moins") : t("Détails")}
+              </button>
             </div>
+            {details && project.description && <div className="mt-0.5 max-w-2xl text-sm text-fg-muted">{project.description}</div>}
+            {details && (
+              <div className="mt-1.5 flex items-center -space-x-1.5">
+                {people.map((a) => (
+                  <span key={a.id} title={`${a.name} — ${a.role}${spec.entry_ids.includes(a.id) ? ` (${t("premier contact")})` : ""}`}>
+                    <Avatar emoji={a.emoji} color={a.color} size={24} />
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
-            <Button variant="primary" onClick={onChat}>
+            <Button variant="primary" size={details ? "md" : "sm"} onClick={onChat}>
               <MessageSquare size={14} /> {t("Discuter avec l'équipe")}
             </Button>
             <Button
@@ -535,49 +557,51 @@ function ProjectDetail({
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface-1 px-3 py-2">
-          <FolderOpen size={15} className="shrink-0 text-fg-muted" />
-          {editPath === null ? (
-            <>
-              <code className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
-                {root}
-              </code>
-              <Button size="sm" variant="ghost" onClick={() => copy(root)} title={t("Copier le chemin")}>
-                {copied === root ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "finder")} title={t("Ouvrir dans le Finder")}>
-                <Folder size={13} /> Finder
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "vscode")} title={t("Ouvrir dans VS Code")}>
-                <Code2 size={13} /> VS Code
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditPath(project.path)} title={t("Changer le dossier du projet")}>
-                <Pencil size={13} />
-              </Button>
-            </>
-          ) : (
-            <form
-              className="flex flex-1 items-center gap-2"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                await crud.save("projects", { id: project.id, path: editPath.trim() });
-                setEditPath(null);
-                reloadProjects();
-                ws.reload();
-              }}
-            >
-              <Input autoFocus className="h-8 font-mono text-xs" value={editPath} onChange={(e) => setEditPath(e.target.value)} />
-              <Button size="sm" variant="primary" type="submit">
-                {t("Enregistrer")}
-              </Button>
-              <Button size="sm" variant="ghost" type="button" onClick={() => setEditPath(null)}>
-                {t("Annuler")}
-              </Button>
-            </form>
-          )}
-        </div>
+        {details && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface-1 px-3 py-2">
+            <FolderOpen size={15} className="shrink-0 text-fg-muted" />
+            {editPath === null ? (
+              <>
+                <code className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
+                  {root}
+                </code>
+                <Button size="sm" variant="ghost" onClick={() => copy(root)} title={t("Copier le chemin")}>
+                  {copied === root ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "finder")} title={t("Ouvrir dans le Finder")}>
+                  <Folder size={13} /> Finder
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => openIn(project.id, "vscode")} title={t("Ouvrir dans VS Code")}>
+                  <Code2 size={13} /> VS Code
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditPath(project.path)} title={t("Changer le dossier du projet")}>
+                  <Pencil size={13} />
+                </Button>
+              </>
+            ) : (
+              <form
+                className="flex flex-1 items-center gap-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await crud.save("projects", { id: project.id, path: editPath.trim() });
+                  setEditPath(null);
+                  reloadProjects();
+                  ws.reload();
+                }}
+              >
+                <Input autoFocus className="h-8 font-mono text-xs" value={editPath} onChange={(e) => setEditPath(e.target.value)} />
+                <Button size="sm" variant="primary" type="submit">
+                  {t("Enregistrer")}
+                </Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => setEditPath(null)}>
+                  {t("Annuler")}
+                </Button>
+              </form>
+            )}
+          </div>
+        )}
 
-        <div className="mt-3 flex items-end gap-1">
+        <div className={cx("flex items-end gap-1", details ? "mt-3" : "mt-1")}>
           {(
             [
               ["overview", t("Vue d'ensemble"), true],
