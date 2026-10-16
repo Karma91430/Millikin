@@ -24,7 +24,7 @@ async function probe(url: string, ok: (r: Response) => boolean | Promise<boolean
 export async function GET() {
   const s = getSettings();
   const searx = s.searxng_url.replace(/\/+$/, "");
-  const host = list<Provider>("providers").find((p) => p.enabled);
+  const host = list<Provider>("providers").find((p) => p.enabled && p.type === "ollama");
   const [searxng, fallback, ollama, node, python, git] = await Promise.all([
     probe(`${searx}/search?q=test&format=json`, async (r) => r.ok && !!(await r.json().catch(() => null)), () => searx),
     s.web_fallback === "off" ? Promise.resolve({ ok: false, detail: "désactivé" }) : probe("https://html.duckduckgo.com/html/?q=test", (r) => r.ok, () => "html.duckduckgo.com"),

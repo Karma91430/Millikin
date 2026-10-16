@@ -5,10 +5,11 @@
 **Your AI team, running on your machine.**
 
 Millikin is a local-first workspace where teams of AI agents scope your idea, ask the right questions,
-split the work, build it and review each other — entirely on [Ollama](https://ollama.com), with no cloud and no API bill.
+split the work, build it and review each other — on [Ollama](https://ollama.com) by default (no cloud, no API bill),
+or on the engine of your choice: your Claude Code or Codex subscription, Anthropic, OpenAI, Mistral, OpenRouter…
 
-![Local first](https://img.shields.io/badge/100%25-local-10b981?style=flat-square)
-![Ollama](https://img.shields.io/badge/models-Ollama-7c6cf6?style=flat-square)
+![Local first](https://img.shields.io/badge/local-first-10b981?style=flat-square)
+![Models](https://img.shields.io/badge/models-Ollama%20%7C%20Claude%20Code%20%7C%20Codex%20%7C%20APIs-7c6cf6?style=flat-square)
 ![Next.js 16](https://img.shields.io/badge/Next.js-16-111?style=flat-square)
 ![MCP](https://img.shields.io/badge/tools-MCP-ec4899?style=flat-square)
 ![License: MIT](https://img.shields.io/badge/license-MIT-f59e0b?style=flat-square)
@@ -42,6 +43,8 @@ Think of it as **LiteLLM and an agent workspace fused together**, with a Kanban 
 | ⛓️ **Dependencies & chains** | Tasks depend on others; their results and a shared **decision log** flow to the next agent. Run a whole chain in dependency order. |
 | 🏃 **Planning & sprints** | One click: the project lead, with the tech lead, breaks the project into **estimated tasks** (story points, priority, assignee) grouped into **sprints**. |
 | 👤 **Agent profiles** | 34 ready-made profiles in 7 categories, each with the tools its role needs; your own profiles; AI-generated agents or whole teams. |
+| 🔌 **Any model engine** | Ollama (default, local), OpenAI-compatible APIs (OpenAI, Mistral, Groq, OpenRouter, LM Studio), Anthropic, or the **Claude Code / Codex CLIs** with your subscription. Switch the default model from the sidebar. |
+| 🆕 **Guided project setup** | Name and description, then a team **suggested by AI** (from your agents and 34 profiles), picked by hand or copied from a template, and the **modules** you need. |
 | 📚 **RAG, skills, MCP** | Local embeddings over your docs (txt, md, pdf, code), reusable Markdown skills, and any **MCP** server (stdio or HTTP). |
 | 🏷️ **Knowledge graph** | Documents tagged by the **local model** (one theme + specific tags), shown as constellations; an animated search lab shows hybrid search and reranking step by step. |
 | 🧩 **Skill library** | 22 built-in skills (code review, debugging, user stories, ML evaluation, executive summary…), filterable by category and assignable to agents in one click. |
@@ -67,6 +70,7 @@ Project lead   → You                report · decisions logged in docs/DECISIO
 ## Get started
 
 **Requirements:** Node.js 22+ and Ollama with a model that supports tools (e.g. `qwen3:8b`) and an embedding model (e.g. `nomic-embed-text`).
+Other engines are optional: add them in **Models → Providers** (an API key, or the `claude` / `codex` CLI installed and logged in). Embeddings need Ollama or an OpenAI-compatible provider.
 
 ```bash
 ollama pull qwen3:8b
@@ -115,7 +119,8 @@ name. An optional key can be set in **Réglages**. Every call is logged under **
 
 | Path | Role |
 |---|---|
-| `src/lib/gateway.ts` | Native Ollama calls (`/api/chat`, `/api/embed`): context size, thinking, reasoning cap, usage logging. |
+| `src/lib/gateway.ts` | Model gateway: native Ollama calls (context size, thinking, reasoning cap) and dispatch to other providers, usage logging. |
+| `src/lib/providers.ts` | Adapters for OpenAI-compatible APIs, Anthropic and the Claude Code / Codex CLIs, with a shared contract (streaming, tool calls, JSON). |
 | `src/lib/orchestrator.ts` | Agent loop and tools, team-graph delegation, consultation of first contacts, scoping/execution phases. |
 | `src/lib/runs.ts` | Server-side run registry: runs survive page changes; clients re-attach with a snapshot. |
 | `src/lib/taskrun.ts`, `planner.ts` | Board task runs with review, dependency chains, project planning into sprints. |

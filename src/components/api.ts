@@ -48,7 +48,7 @@ export type Team = {
   clarify: boolean;
   concert: boolean;
 };
-export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; updated_at: number };
+export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; modules: string[]; updated_at: number };
 export type Evaluation = { verdict: "valide" | "a_corriger"; score: number; comment: string; by: string; at: number };
 export type Skill = { id: string; name: string; description: string; content: string; category: string };
 export type Kb = { id: string; name: string; description: string };
@@ -111,7 +111,7 @@ export type Message = { id: string; role: "user" | "assistant"; agent_id: string
 export type Meta = {
   tools: { id: string; label: string; description: string; danger: boolean }[];
   models: { ref: string; label: string; provider: string; kind: string; supports_tools: boolean }[];
-  presets: Record<string, { name: string; base_url: string }>;
+  presets: Record<string, { type: string; name: string; base_url: string; needsKey: boolean; group: "local" | "cloud" | "cli"; hint: string }>;
 };
 
 export async function api<T = unknown>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {

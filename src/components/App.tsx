@@ -81,6 +81,12 @@ function Workspace() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [createFrom, setCreateFrom] = useState<string | null>(null);
   const meta = useData<Meta>("/api/meta");
+  const prefs = useData<Record<string, string>>("/api/settings");
+  const chatModels = (meta.data?.models ?? []).filter((x) => x.kind !== "embedding");
+  const setDefaultModel = async (ref: string) => {
+    await api("/api/settings", { method: "POST", json: { default_model: ref } });
+    prefs.reload();
+  };
 
   const go = (v: View) => {
     setView(v);
@@ -202,7 +208,29 @@ function Workspace() {
               </button>
             ))}
           </div>
-          <div className={cx("hidden text-[11px] text-fg-subtle", navWide && "xl:block")}>{tr("100 % local · Ollama")}</div>
+          {/* default engine of the agents: switch provider/model in one click */}
+          {navWide && chatModels.length > 0 && (
+            <label className="hidden flex-col gap-1 xl:flex" title={tr("Modèle utilisé par les agents qui n'en ont pas de défini")}>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">{tr("Modèle par défaut")}</span>
+              <select
+                value={prefs.data?.default_model ?? ""}
+                onChange={(e) => setDefaultModel(e.target.value)}
+                className="h-8 w-full rounded-md border border-line bg-surface-2 px-1.5 text-[11px] text-fg outline-none focus:border-accent"
+              >
+                {[...new Set(chatModels.map((x) => x.provider))].map((prov) => (
+                  <optgroup key={prov} label={prov}>
+                    {chatModels
+                      .filter((x) => x.provider === prov)
+                      .map((x) => (
+                        <option key={x.ref} value={x.ref}>
+                          {x.label}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </nav>
 

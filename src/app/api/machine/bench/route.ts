@@ -4,7 +4,7 @@ import { ollamaBase, ollamaHeaders } from "@/lib/gateway";
 /** Measure real speed on this machine: a short generation, timings reported by Ollama. */
 export async function POST(req: Request) {
   const { model } = (await req.json()) as { model: string };
-  const p = list<Provider>("providers").find((x) => x.enabled);
+  const p = list<Provider>("providers").find((x) => x.enabled && x.type === "ollama");
   if (!p || !model) return Response.json({ error: "Modèle ou hôte manquant" }, { status: 400 });
   try {
     const r = await fetch(`${ollamaBase(p)}/api/generate`, {

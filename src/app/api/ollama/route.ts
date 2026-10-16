@@ -2,7 +2,7 @@ import { get, list, type Provider } from "@/lib/db";
 import { capabilities, discoverModels, ollamaBase, ollamaHeaders } from "@/lib/gateway";
 
 function host(id: string | null): Provider {
-  const p = id ? get<Provider>("providers", id) : list<Provider>("providers").find((x) => x.enabled);
+  const p = id ? get<Provider>("providers", id) : list<Provider>("providers").find((x) => x.enabled && x.type === "ollama");
   if (!p) throw new Error("Aucun hôte Ollama configuré");
   return p;
 }

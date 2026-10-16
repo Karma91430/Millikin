@@ -1,8 +1,9 @@
 "use client";
 
-import { CalendarRange, Check, ChevronRight, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Square, Trash2 } from "lucide-react";
+import { Blocks, CalendarRange, Check, ChevronRight, Code2, Copy, Eye, File, Folder, FolderOpen, FolderPlus, Link2, ListTree, Loader2, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, RotateCcw, Sparkles, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
+import { hasModule, PROJECT_MODULES } from "@/lib/modules";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
@@ -196,6 +197,7 @@ export function ProjectsView({
       {showCreate && (
         <NewProject
           teams={teams}
+          agents={agents}
           templateId={createFrom}
           onClose={() => (setCreating(false), onCreateHandled())}
           onCreated={(p, scoping) => {
@@ -211,15 +213,71 @@ export function ProjectsView({
   );
 }
 
-function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; templateId: string | null; onClose: () => void; onCreated: (p: Project, scoping: boolean) => void }) {
+type ProfileItem = { id: string; name: string; role: string; emoji: string; color: string; category: string; builtin: boolean };
+type TeamMode = "ai" | "manual" | "template";
+
+/** New project: name, description, a team (AI-suggested, hand-picked or from a template) and the modules to enable. */
+function NewProject({
+  teams,
+  agents,
+  templateId,
+  onClose,
+  onCreated,
+}: {
+  teams: Team[];
+  agents: Agent[];
+  templateId: string | null;
+  onClose: () => void;
+  onCreated: (p: Project, scoping: boolean) => void;
+}) {
   const { t } = useT();
+  const profiles = useData<{ profiles: ProfileItem[] }>("/api/profiles");
   const [scoping, setScoping] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [mode, setMode] = useState<TeamMode>(templateId && templateId !== "__new" ? "template" : "ai");
   const [template, setTemplate] = useState(templateId && templateId !== "__new" ? templateId : (teams[0]?.id ?? ""));
+  const [members, setMembers] = useState<string[]>([]);
+  const [entries, setEntries] = useState<string[]>([]);
+  const [modules, setModules] = useState<string[]>(["board", "sprints", "files", "decisions", "stats"]);
   const [dir, setDir] = useState("");
   const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "team" | "modules" | "create">("");
+  const [reasons, setReasons] = useState<{ team?: string; modules?: string }>({});
+
+  // Candidates: existing agents, then built-in profiles that have no agent yet (instantiated on creation).
+  const candidates: ProfileItem[] = [
+    ...agents.map((a) => ({ id: a.id, name: a.name, role: a.role, emoji: a.emoji, color: a.color, category: t("Mes agents"), builtin: false })),
+    ...(profiles.data?.profiles ?? []).filter((p) => p.builtin && !agents.some((a) => a.name === p.name)),
+  ];
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const groups = [...new Set(candidates.map((c) => c.category))];
+  const toggleMember = (id: string) => {
+    setMembers((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+    setEntries((e) => e.filter((x) => x !== id || !members.includes(id)));
+  };
+  const toggleEntry = (id: string) => {
+    if (!members.includes(id)) setMembers((m) => [...m, id]);
+    setEntries((e) => (e.includes(id) ? e.filter((x) => x !== id) : [...e, id]));
+  };
+  const suggest = async (what: "team" | "modules") => {
+    setBusy(what);
+    setError(undefined);
+    try {
+      const r = await api<{ members?: string[]; entries?: string[]; modules?: string[]; reason?: string }>("/api/projects/suggest", { method: "POST", json: { name, description, what } });
+      if (what === "team") {
+        setMembers(r.members ?? []);
+        setEntries(r.entries ?? []);
+      } else setModules(r.modules ?? []);
+      setReasons((x) => ({ ...x, [what]: r.reason }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  };
+  const teamReady = mode === "template" ? true : members.length > 0;
+
   return (
     <Modal
       open
@@ -228,44 +286,150 @@ function NewProject({ teams, templateId, onClose, onCreated }: { teams: Team[]; 
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Annuler
+            {t("Annuler")}
           </Button>
           <Button
             variant="primary"
-            disabled={!name.trim() || busy}
+            disabled={!name.trim() || !teamReady || !!busy}
             onClick={async () => {
-              setBusy(true);
+              setBusy("create");
               try {
-                onCreated(await api<Project>("/api/projects", { method: "POST", json: { name, description, template_id: template, path: dir } }), scoping);
+                const json =
+                  mode === "template" ? { name, description, template_id: template, path: dir, modules } : { name, description, members, entries, path: dir, modules };
+                onCreated(await api<Project>("/api/projects", { method: "POST", json }), scoping);
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
-                setBusy(false);
+                setBusy("");
               }
             }}
           >
-            {t("Créer le projet")}
+            {busy === "create" ? t("Création…") : t("Créer le projet")}
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
         <ErrorNote>{error}</ErrorNote>
         <Field label={t("Nom du projet")}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Appli de réservation de salles")} />
         </Field>
-        <Field label={t("Description")}>
-          <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("Objectif, contexte, contraintes…")} />
+        <Field label={t("Description")} hint={t("Objectif, utilisateurs, contraintes : l'IA s'en sert pour proposer l'équipe et les modules.")}>
+          <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("Objectif, contexte, contraintes…")} />
         </Field>
-        <Field label={t("Équipe (modèle)")} hint={t("La composition est copiée dans le projet : tu pourras l'ajuster sans modifier le modèle.")}>
-          <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
-            {teams.map((tm) => (
-              <option key={tm.id} value={tm.id}>
-                👥 {tm.name}
-              </option>
+
+        {/* team */}
+        <div className="flex flex-col gap-2">
+          <div className="text-sm font-semibold">{t("Équipe")}</div>
+          <div className="flex rounded-lg border border-line p-0.5 text-xs">
+            {(
+              [
+                ["ai", "Générer avec l'IA"],
+                ["manual", "Choisir à la main"],
+                ["template", "Depuis un modèle d'équipe"],
+              ] as [TeamMode, string][]
+            ).map(([m, label]) => (
+              <button key={m} onClick={() => setMode(m)} className={cx("flex-1 rounded-md px-2 py-1.5", mode === m ? "bg-surface-3 text-fg" : "text-fg-muted hover:text-fg")}>
+                {t(label)}
+              </button>
             ))}
-            <option value="">{t("Équipe vide (à construire)")}</option>
-          </Select>
-        </Field>
+          </div>
+          {mode === "template" ? (
+            <Field label={t("Équipe (modèle)")} hint={t("La composition est copiée dans le projet : tu pourras l'ajuster sans modifier le modèle.")}>
+              <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
+                {teams.map((tm) => (
+                  <option key={tm.id} value={tm.id}>
+                    👥 {tm.name}
+                  </option>
+                ))}
+                <option value="">{t("Équipe vide (à construire)")}</option>
+              </Select>
+            </Field>
+          ) : (
+            <>
+              {mode === "ai" && (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => suggest("team")} disabled={!name.trim() || !!busy}>
+                    <Sparkles size={13} /> {busy === "team" ? t("Composition…") : members.length ? t("Proposer une autre équipe") : t("Proposer une équipe")}
+                  </Button>
+                  <span className="text-xs text-fg-subtle">{reasons.team || t("Le modèle choisit parmi tes agents et les profils disponibles ; tu peux ajuster ensuite.")}</span>
+                </div>
+              )}
+              {members.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {members.map((id) => {
+                    const c = byId.get(id);
+                    if (!c) return null;
+                    const lead = entries.includes(id);
+                    return (
+                      <span key={id} className={cx("flex items-center gap-1.5 rounded-full border py-0.5 pl-1 pr-2 text-xs", lead ? "border-amber-400/60 bg-amber-400/10" : "border-line bg-surface-2")}>
+                        <Avatar emoji={c.emoji} color={c.color} size={18} />
+                        {c.name}
+                        {!agents.some((a) => a.id === id) && <span className="text-[10px] text-fg-subtle">{t("(profil)")}</span>}
+                        <button onClick={() => toggleEntry(id)} title={t("Premier contact")} className={lead ? "text-amber-400" : "text-fg-subtle hover:text-fg"}>
+                          ★
+                        </button>
+                        <button onClick={() => toggleMember(id)} aria-label={t("Retirer")} className="text-fg-subtle hover:text-fg">
+                          <X size={11} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {members.length > 0 && <p className="text-[11px] text-fg-subtle">{t("★ = premier contact : il reçoit tes messages, cadre le projet et délègue aux autres membres.")}</p>}
+              {mode === "manual" && (
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-line">
+                  {groups.map((g) => (
+                    <div key={g}>
+                      <div className="sticky top-0 bg-surface-1 px-3 py-1 text-[11px] font-semibold text-fg-subtle">{g}</div>
+                      {candidates
+                        .filter((c) => c.category === g)
+                        .map((c) => (
+                          <label key={c.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-surface-2">
+                            <input type="checkbox" checked={members.includes(c.id)} onChange={() => toggleMember(c.id)} className="accent-[var(--accent)]" />
+                            <Avatar emoji={c.emoji} color={c.color} size={20} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate">{c.name}</span>
+                              <span className="block truncate text-[11px] text-fg-subtle">{c.role}</span>
+                            </span>
+                          </label>
+                        ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* modules */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{t("Modules du projet")}</span>
+            <Button size="sm" variant="ghost" onClick={() => suggest("modules")} disabled={!name.trim() || !!busy}>
+              <Sparkles size={13} /> {busy === "modules" ? t("Analyse…") : t("Suggérer avec l'IA")}
+            </Button>
+          </div>
+          {reasons.modules && <p className="text-xs text-fg-subtle">{reasons.modules}</p>}
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {PROJECT_MODULES.map((m) => (
+              <label key={m.id} className={cx("flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm", modules.includes(m.id) ? "border-accent/50 bg-accent/5" : "border-line")}>
+                <input
+                  type="checkbox"
+                  checked={modules.includes(m.id)}
+                  onChange={() => setModules((x) => (x.includes(m.id) ? x.filter((y) => y !== m.id) : [...x, m.id]))}
+                  className="mt-0.5 accent-[var(--accent)]"
+                />
+                <span>
+                  <span className="block font-medium">{t(m.label)}</span>
+                  <span className="block text-[11px] text-fg-muted">{t(m.description)}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-fg-subtle">{t("Vue d'ensemble et Équipe sont toujours présents. Tu pourras changer les modules plus tard.")}</p>
+        </div>
+
         <Field label={t("Dossier du projet (optionnel)")} hint={t("Vide : un dossier dédié est créé dans workspace/ avec le nom du projet.")}>
           <Input className="font-mono text-xs" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="/Users/moi/Projets/reservation-salles" />
         </Field>
@@ -307,7 +471,11 @@ function ProjectDetail({
   onDeleted: () => void;
 }) {
   const { t } = useT();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tabState, setTab] = useState<Tab>("overview");
+  const [editModules, setEditModules] = useState(false);
+  const has = (id: Parameters<typeof hasModule>[1]) => hasModule(project, id);
+  // A tab whose module was turned off falls back to the overview.
+  const tab: Tab = (tabState === "tasks" && !has("board")) || (tabState === "files" && !has("files")) || (tabState === "stats" && !has("stats")) ? "overview" : tabState;
   const [openFile, setOpenFile] = useState<string | null>(null);
   const ws = useData<Workspace>(`/api/workspace?projectId=${project.id}`);
   const { copied, copy } = useCopy();
@@ -409,16 +577,18 @@ function ProjectDetail({
           )}
         </div>
 
-        <div className="mt-3 flex gap-1">
+        <div className="mt-3 flex items-end gap-1">
           {(
             [
-              ["overview", t("Vue d'ensemble")],
-              ["tasks", t("Tâches ({n})", { n: tasks.length })],
-              ["files", t("Fichiers ({n})", { n: ws.data?.entries.filter((e) => !e.dir).length ?? 0 })],
-              ["team", t("Équipe ({n})", { n: people.length })],
-              ["stats", t("Stats")],
+              ["overview", t("Vue d'ensemble"), true],
+              ["tasks", t("Tâches ({n})", { n: tasks.length }), has("board")],
+              ["files", t("Fichiers ({n})", { n: ws.data?.entries.filter((e) => !e.dir).length ?? 0 }), has("files")],
+              ["team", t("Équipe ({n})", { n: people.length }), true],
+              ["stats", t("Stats"), has("stats")],
             ] as const
-          ).map(([id, label]) => (
+          )
+            .filter(([, , on]) => on)
+            .map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
@@ -427,13 +597,26 @@ function ProjectDetail({
               {label}
             </button>
           ))}
+          <button onClick={() => setEditModules(true)} className="mb-1 ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg" title={t("Choisir les modules du projet")}>
+            <Blocks size={13} /> {t("Modules")}
+          </button>
         </div>
       </div>
+      {editModules && (
+        <ModulesEditor
+          project={project}
+          onClose={() => setEditModules(false)}
+          onSaved={() => {
+            setEditModules(false);
+            reloadProjects();
+          }}
+        />
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} />}
+        {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} has={has} />}
         {tab === "tasks" && (
-          <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} onPlanChat={onPlanChat} />
+          <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} onPlanChat={onPlanChat} sprintsOn={has("sprints")} />
         )}
         {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
@@ -443,19 +626,59 @@ function ProjectDetail({
   );
 }
 
+/** Turn a project's optional modules on or off. */
+function ModulesEditor({ project, onClose, onSaved }: { project: Project; onClose: () => void; onSaved: () => void }) {
+  const { t } = useT();
+  const [mods, setMods] = useState<string[]>(project.modules?.length ? project.modules : PROJECT_MODULES.map((m) => m.id));
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t("Modules du projet")}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            {t("Annuler")}
+          </Button>
+          <Button variant="primary" onClick={async () => (await crud.save("projects", { id: project.id, modules: mods }), onSaved())}>
+            {t("Enregistrer")}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        {PROJECT_MODULES.map((m) => (
+          <label key={m.id} className={cx("flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm", mods.includes(m.id) ? "border-accent/50 bg-accent/5" : "border-line")}>
+            <input type="checkbox" checked={mods.includes(m.id)} onChange={() => setMods((x) => (x.includes(m.id) ? x.filter((y) => y !== m.id) : [...x, m.id]))} className="mt-0.5 accent-[var(--accent)]" />
+            <span>
+              <span className="block font-medium">{t(m.label)}</span>
+              <span className="block text-[11px] text-fg-muted">{t(m.description)}</span>
+            </span>
+          </label>
+        ))}
+        <p className="text-[11px] text-fg-subtle">{t("Désactiver un module masque son onglet ; les données (tâches, fichiers, décisions) sont conservées.")}</p>
+      </div>
+    </Modal>
+  );
+}
+
 /** Team tab: the project's own team composition, and the resources each member may use. */
 function TeamTab(props: { project: Project; agents: Agent[]; onSaved: () => void; onAgentsChange: () => void }) {
   const { t } = useT();
-  const [sub, setSub] = useState<"composition" | "resources">("composition");
+  const [subState, setSub] = useState<"composition" | "resources">("composition");
+  const resourcesOn = hasModule(props.project, "knowledge");
+  const sub = resourcesOn ? subState : "composition";
   return (
     <div className="flex h-full flex-col">
       <div className="flex gap-1 px-6 pt-4">
         {(
           [
-            ["composition", t("Composition")],
-            ["resources", t("Ressources (connaissances & MCP)")],
+            ["composition", t("Composition"), true],
+            ["resources", t("Ressources (connaissances & MCP)"), resourcesOn],
           ] as const
-        ).map(([id, label]) => (
+        )
+          .filter(([, , on]) => on)
+          .map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)} className={cx("rounded-lg px-3 py-1 text-sm", sub === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-surface-2")}>
             {label}
           </button>
@@ -513,6 +736,7 @@ function Overview({
   ws,
   onTab,
   onFile,
+  has,
 }: {
   projectId: string;
   tasks: Task[];
@@ -520,6 +744,7 @@ function Overview({
   ws?: Workspace;
   onTab: (t: Tab) => void;
   onFile: (p: string) => void;
+  has: (id: Parameters<typeof hasModule>[1]) => boolean;
 }) {
   const { t, lang } = useT();
   const hasLog = ws?.entries.some((e) => e.path === "docs/DECISIONS.md");
@@ -533,88 +758,96 @@ function Overview({
     .slice(0, 8);
   return (
     <div className="grid gap-4 p-6 lg:grid-cols-2">
-      <Card className="p-4 lg:col-span-2">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold">{t("Avancement")}</div>
-          <div className="text-sm tabular-nums text-fg-muted">{t("{n} % terminé", { n: pct })}</div>
-        </div>
-        <div className="mb-4 flex h-2 overflow-hidden rounded-full bg-surface-3">
-          {COLUMNS.map((c) => {
-            const n = tasks.filter((x) => x.status === c.id).length;
-            return n ? <div key={c.id} style={{ width: `${(n / tasks.length) * 100}%`, background: c.color }} title={`${t(c.label)} : ${n}`} /> : null;
-          })}
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {COLUMNS.map((c) => (
-            <button key={c.id} onClick={() => onTab("tasks")} className="rounded-lg border border-line bg-surface-2 p-3 text-left hover:border-line-strong">
-              <div className="flex items-center gap-1.5 text-xs text-fg-muted">
-                <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                {t(c.label)}
+      {has("board") && (
+        <Card className="p-4 lg:col-span-2">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-sm font-semibold">{t("Avancement")}</div>
+            <div className="text-sm tabular-nums text-fg-muted">{t("{n} % terminé", { n: pct })}</div>
+          </div>
+          <div className="mb-4 flex h-2 overflow-hidden rounded-full bg-surface-3">
+            {COLUMNS.map((c) => {
+              const n = tasks.filter((x) => x.status === c.id).length;
+              return n ? <div key={c.id} style={{ width: `${(n / tasks.length) * 100}%`, background: c.color }} title={`${t(c.label)} : ${n}`} /> : null;
+            })}
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {COLUMNS.map((c) => (
+              <button key={c.id} onClick={() => onTab("tasks")} className="rounded-lg border border-line bg-surface-2 p-3 text-left hover:border-line-strong">
+                <div className="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
+                  {t(c.label)}
+                </div>
+                <div className="mt-1 text-xl font-semibold tabular-nums">{tasks.filter((x) => x.status === c.id).length}</div>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+      {has("board") && (
+        <Card>
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <span className="text-sm font-semibold">{t("Tâches récentes")}</span>
+            <button onClick={() => onTab("tasks")} className="text-xs text-accent hover:underline">
+              {t("Tableau")}
+            </button>
+          </div>
+          {recentTasks.map((task) => {
+            const col = COLUMNS.find((c) => c.id === task.status)!;
+            const who = byId.get(task.assignee_id);
+            return (
+              <div key={task.id} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-0">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: col.color }} title={t(col.label)} />
+                <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
+                {task.evaluation && <EvalBadge e={task.evaluation} />}
+                <Badge color={col.color}>{t(col.label)}</Badge>
+                {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
               </div>
-              <div className="mt-1 text-xl font-semibold tabular-nums">{tasks.filter((x) => x.status === c.id).length}</div>
+            );
+          })}
+          {!tasks.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucune tâche. Discute avec l'équipe pour planifier le projet, ou crée-les dans le tableau.")}</div>}
+        </Card>
+      )}
+      {has("files") && (
+        <Card>
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <span className="text-sm font-semibold">{t("Fichiers récents")}</span>
+            <button onClick={() => onTab("files")} className="text-xs text-accent hover:underline">
+              {t("Tous les fichiers")}
+            </button>
+          </div>
+          {recentFiles.map((f) => (
+            <button key={f.path} onClick={() => onFile(f.path)} className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-surface-2">
+              <File size={13} className="shrink-0 text-fg-muted" />
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{f.path}</span>
+              <span className="shrink-0 text-[11px] text-fg-subtle">{ago(f.mtime, t, lang)}</span>
             </button>
           ))}
-        </div>
-      </Card>
-      <Card>
-        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">{t("Tâches récentes")}</span>
-          <button onClick={() => onTab("tasks")} className="text-xs text-accent hover:underline">
-            {t("Tableau")}
-          </button>
-        </div>
-        {recentTasks.map((task) => {
-          const col = COLUMNS.find((c) => c.id === task.status)!;
-          const who = byId.get(task.assignee_id);
-          return (
-            <div key={task.id} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-0">
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: col.color }} title={t(col.label)} />
-              <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
-              {task.evaluation && <EvalBadge e={task.evaluation} />}
-              <Badge color={col.color}>{t(col.label)}</Badge>
-              {who && <Avatar emoji={who.emoji} color={who.color} size={20} />}
-            </div>
-          );
-        })}
-        {!tasks.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucune tâche. Discute avec l'équipe pour planifier le projet, ou crée-les dans le tableau.")}</div>}
-      </Card>
-      <Card>
-        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">{t("Fichiers récents")}</span>
-          <button onClick={() => onTab("files")} className="text-xs text-accent hover:underline">
-            {t("Tous les fichiers")}
-          </button>
-        </div>
-        {recentFiles.map((f) => (
-          <button key={f.path} onClick={() => onFile(f.path)} className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-surface-2">
-            <File size={13} className="shrink-0 text-fg-muted" />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{f.path}</span>
-            <span className="shrink-0 text-[11px] text-fg-subtle">{ago(f.mtime, t, lang)}</span>
-          </button>
-        ))}
-        {!recentFiles.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucun fichier pour l'instant.")}</div>}
-      </Card>
-      <Card className="lg:col-span-2">
-        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <span className="text-sm font-semibold">{t("Journal des décisions")}</span>
-          {hasLog && (
-            <button onClick={() => onFile("docs/DECISIONS.md")} className="font-mono text-xs text-accent hover:underline">
-              docs/DECISIONS.md
-            </button>
-          )}
-        </div>
-        <div className="max-h-80 overflow-y-auto px-4 py-3">
-          {log.data?.content ? (
-            <Markdown>{log.data.content.replace(/^# Journal des décisions\n+/, "")}</Markdown>
-          ) : (
-            <div className="text-sm text-fg-subtle">
-              {t(
-                "Vide pour l'instant. Il se remplit quand tu valides un cadrage, quand une tâche est contrôlée, et quand les premiers contacts consignent une décision. Chaque agent du projet le reçoit.",
-              )}
-            </div>
-          )}
-        </div>
-      </Card>
+          {!recentFiles.length && <div className="px-4 py-4 text-sm text-fg-subtle">{t("Aucun fichier pour l'instant.")}</div>}
+        </Card>
+      )}
+      {has("decisions") && (
+        <Card className="lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <span className="text-sm font-semibold">{t("Journal des décisions")}</span>
+            {hasLog && (
+              <button onClick={() => onFile("docs/DECISIONS.md")} className="font-mono text-xs text-accent hover:underline">
+                docs/DECISIONS.md
+              </button>
+            )}
+          </div>
+          <div className="max-h-80 overflow-y-auto px-4 py-3">
+            {log.data?.content ? (
+              <Markdown>{log.data.content.replace(/^# Journal des décisions\n+/, "")}</Markdown>
+            ) : (
+              <div className="text-sm text-fg-subtle">
+                {t(
+                  "Vide pour l'instant. Il se remplit quand tu valides un cadrage, quand une tâche est contrôlée, et quand les premiers contacts consignent une décision. Chaque agent du projet le reçoit.",
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -638,6 +871,7 @@ function Board({
   runs,
   onRunsChanged,
   onPlanChat,
+  sprintsOn,
 }: {
   project: Project;
   tasks: Task[];
@@ -647,6 +881,7 @@ function Board({
   runs: RunInfo[];
   onRunsChanged: () => void;
   onPlanChat: () => void;
+  sprintsOn: boolean;
 }) {
   const { t: tr } = useT();
   const [edit, setEdit] = useState<Partial<Task> | null>(null);
@@ -754,24 +989,26 @@ function Board({
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
-      <SprintBar
-        sprints={sprints}
-        tasks={tasks}
-        filter={filter}
-        onFilter={setFilter}
-        onNew={() => setSprintEdit({ project_id: project.id, name: `Sprint ${sprints.length + 1}`, goal: "", start_date: "", end_date: "", status: "planned" })}
-        onEdit={setSprintEdit}
-        onAction={async (id, action) => {
-          setError(undefined);
-          try {
-            await api("/api/sprints/action", { method: "POST", json: { id, action } });
-            sprintData.reload();
-            reload();
-          } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-          }
-        }}
-      />
+      {sprintsOn && (
+        <SprintBar
+          sprints={sprints}
+          tasks={tasks}
+          filter={filter}
+          onFilter={setFilter}
+          onNew={() => setSprintEdit({ project_id: project.id, name: `Sprint ${sprints.length + 1}`, goal: "", start_date: "", end_date: "", status: "planned" })}
+          onEdit={setSprintEdit}
+          onAction={async (id, action) => {
+            setError(undefined);
+            try {
+              await api("/api/sprints/action", { method: "POST", json: { id, action } });
+              sprintData.reload();
+              reload();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        />
+      )}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-6 pb-6 pt-3 md:grid-cols-5">
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => inFilter(t) && statusOf(t) === col.id);
