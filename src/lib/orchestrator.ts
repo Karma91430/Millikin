@@ -350,6 +350,7 @@ export async function runAgent(p: RunParams): Promise<string> {
     let carried = ""; // text already streamed before a nudge, kept in the final answer
     for (let step = 0; step < maxSteps; step++) {
       const last = step === maxSteps - 1;
+      const stepStart = Date.now();
       const res = await chatStream({
         ref: agent.model,
         messages,
@@ -362,6 +363,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         onText: (text) => emit({ type: "text", callId, text }),
         onReasoning: (text) => emit({ type: "reasoning", callId, text }),
       });
+      emit({ type: "llm", callId, model: resolveModel(agent.model).ref, promptTokens: res.usage.prompt_tokens, completionTokens: res.usage.completion_tokens, ms: Date.now() - stepStart });
       if (!res.toolCalls.length) {
         // Small local models often announce an action ("je demande maintenant au développeur…") and stop.
         // Nudge once so the announced step actually runs (not during scoping, where asking is the goal).

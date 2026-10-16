@@ -8,11 +8,15 @@ export type TraceEvent =
   | { type: "reasoning"; callId: string; text: string }
   | { type: "tool_call"; callId: string; toolCallId: string; name: string; args: unknown }
   | { type: "tool_result"; callId: string; toolCallId: string; result: string; error?: boolean }
+  | { type: "llm"; callId: string; model: string; promptTokens: number; completionTokens: number; ms: number }
   | { type: "agent_end"; callId: string; content: string }
   | { type: "error"; callId?: string; message: string }
   | { type: "done"; messageId: string };
 
-export type ToolUse = { id: string; name: string; args: unknown; result?: string; error?: boolean; childCallId?: string };
+export type ToolUse = { id: string; name: string; args: unknown; result?: string; error?: boolean; childCallId?: string; startedAt?: number; endedAt?: number };
+
+/** One model call inside an agent turn (traces saved before this existed have none). */
+export type LlmStep = { model: string; promptTokens: number; completionTokens: number; ms: number; endedAt: number };
 
 export type CallNode = {
   callId: string;
@@ -23,6 +27,7 @@ export type CallNode = {
   reasoning: string;
   status: "thinking" | "streaming" | "tool" | "waiting" | "done" | "error";
   tools: ToolUse[];
+  llm?: LlmStep[];
   startedAt: number;
   endedAt?: number;
   error?: string;
@@ -70,14 +75,17 @@ export function applyEvent(t: Trace, ev: TraceEvent): Trace {
       patch(ev.callId, (c) => ({
         ...c,
         status: ev.name === "ask_agent" ? "waiting" : "tool",
-        tools: [...c.tools, { id: ev.toolCallId, name: ev.name, args: ev.args }],
+        tools: [...c.tools, { id: ev.toolCallId, name: ev.name, args: ev.args, startedAt: Date.now() }],
       }));
       break;
     case "tool_result":
       patch(ev.callId, (c) => {
-        const tools = c.tools.map((x) => (x.id === ev.toolCallId ? { ...x, result: ev.result, error: ev.error } : x));
+        const tools = c.tools.map((x) => (x.id === ev.toolCallId ? { ...x, result: ev.result, error: ev.error, endedAt: Date.now() } : x));
         return { ...c, tools, status: tools.some((x) => x.result === undefined) ? c.status : "thinking" };
       });
+      break;
+    case "llm":
+      patch(ev.callId, (c) => ({ ...c, llm: [...(c.llm ?? []), { model: ev.model, promptTokens: ev.promptTokens, completionTokens: ev.completionTokens, ms: ev.ms, endedAt: Date.now() }] }));
       break;
     case "agent_end":
       patch(ev.callId, (c) => ({ ...c, text: ev.content, status: "done", endedAt: Date.now() }));

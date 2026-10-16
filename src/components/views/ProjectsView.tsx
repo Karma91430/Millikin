@@ -9,6 +9,7 @@ import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
 import { CallFocus } from "../chat/CallFocus";
 import { ProjectResourcesPanel } from "../ProjectResources";
+import { ProjectPilot } from "./ProjectPilot";
 import { TeamBuilder } from "../TeamBuilder";
 import { Avatar, Badge, Button, Card, cx, Empty, ErrorNote, Field, Input, Markdown, Modal, Select, Textarea, usePersistentFlag } from "../ui";
 import { useRunTrace } from "../useRunTrace";
@@ -27,7 +28,7 @@ const PRIORITY: Record<Task["priority"], { label: string; color?: string }> = {
 };
 type Entry = { path: string; dir: boolean; size: number; mtime: number };
 type Workspace = { root: string; entries: Entry[] };
-type Tab = "overview" | "tasks" | "files" | "knowledge" | "team" | "stats";
+type Tab = "overview" | "tasks" | "files" | "knowledge" | "team" | "pilot" | "stats";
 const POINTS = [0, 1, 2, 3, 5, 8, 13];
 
 const ago = (ms: number, t: (fr: string, vars?: Record<string, string | number>) => string, lang: string) => {
@@ -626,6 +627,7 @@ function ProjectDetail({
               ["files", t("Fichiers ({n})", { n: ws.data?.entries.filter((e) => !e.dir).length ?? 0 }), has("files")],
               ["knowledge", t("Connaissances et MCP"), has("knowledge")],
               ["team", t("Équipe ({n})", { n: people.length }), true],
+              ["pilot", t("Pilotage"), true],
               ["stats", t("Stats"), has("stats")],
             ] as const
           )
@@ -674,6 +676,7 @@ function ProjectDetail({
         )}
         {tab === "stats" && <ProjectStats projectId={project.id} busy={busy} />}
         {tab === "files" && <Files projectId={project.id} ws={ws.data} reload={ws.reload} selected={openFile} onSelect={setOpenFile} />}
+        {tab === "pilot" && <ProjectPilot project={project} agents={agents} sprintsOn={has("sprints")} />}
         {tab === "knowledge" && <ProjectResourcesPanel key={project.id} project={project} agents={agents} onSaved={reloadProjects} />}
         {tab === "team" && <ProjectTeam project={project} agents={agents} onSaved={reloadProjects} onAgentsChange={onAgentsChange} />}
       </div>
@@ -1141,7 +1144,8 @@ function Board({
           onAction={async (id, action) => {
             setError(undefined);
             try {
-              await api("/api/sprints/action", { method: "POST", json: { id, action } });
+              const r = await api<{ reviewError?: string }>("/api/sprints/action", { method: "POST", json: { id, action } });
+              if (r?.reviewError) setError(tr("Sprint clôturé, mais la revue n'a pas pu démarrer : {e}", { e: r.reviewError }));
               sprintData.reload();
               reload();
             } catch (e) {
