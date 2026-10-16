@@ -4,7 +4,9 @@ import { hasUsers, login, saveUser, SESSION_COOKIE } from "@/lib/access";
 /** First launch with accounts: create the administrator (only possible while no account exists, from this machine). */
 export async function POST(req: NextRequest) {
   if (hasUsers()) return NextResponse.json({ error: "Un compte administrateur existe déjà" }, { status: 409 });
-  if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(req.nextUrl.hostname)) return NextResponse.json({ error: "À faire depuis la machine Millikin" }, { status: 403 });
+  // Convenience check (the Host header comes from the client); the binding to 127.0.0.1 is what keeps this local.
+  const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "") || req.nextUrl.hostname;
+  if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) return NextResponse.json({ error: "À faire depuis la machine Millikin" }, { status: 403 });
   const { email, name, password } = (await req.json()) as { email: string; name?: string; password: string };
   try {
     saveUser(null, { email, name: name ?? "", password, role: "admin", can_create_projects: true, can_manage_agents: true });
