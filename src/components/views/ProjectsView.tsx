@@ -614,7 +614,19 @@ function ProjectDetail({
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "overview" && <Overview projectId={project.id} tasks={tasks} byId={byId} ws={ws.data} onTab={setTab} onFile={showFile} has={has} />}
+        {tab === "overview" && (
+          <Overview
+            project={project}
+            tasks={tasks}
+            byId={byId}
+            ws={ws.data}
+            onTab={setTab}
+            onFile={showFile}
+            has={has}
+            onSaved={reloadProjects}
+            onModules={() => setEditModules(true)}
+          />
+        )}
         {tab === "tasks" && (
           <Board project={project} tasks={tasks} agents={people} allAgents={byId} reload={reloadTasks} runs={runs} onRunsChanged={onRunsChanged} onPlanChat={onPlanChat} sprintsOn={has("sprints")} />
         )}
@@ -729,24 +741,136 @@ function ProjectTeam({ project, agents, onSaved, onAgentsChange }: { project: Pr
   );
 }
 
+/** Project sheet: identity of the project (name, description, folder, modules, team, dates), editable in place. */
+function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project; byId: Map<string, Agent>; onSaved: () => void; onModules: () => void }) {
+  const { t, lang } = useT();
+  const [edit, setEdit] = useState<{ name: string; description: string } | null>(null);
+  const [error, setError] = useState<string>();
+  const spec = specFromTeam(project.team);
+  const leads = spec.entry_ids.map((id) => byId.get(id)).filter((a): a is Agent => !!a);
+  const members = spec.agent_ids.map((id) => byId.get(id)).filter((a): a is Agent => !!a);
+  const mods = PROJECT_MODULES.filter((m) => hasModule(project, m.id));
+  const date = (ms?: number) => (ms ? new Date(ms).toLocaleDateString(lang === "en" ? "en-GB" : "fr-FR", { day: "numeric", month: "long", year: "numeric" }) : "—");
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="grid gap-1 py-2 sm:grid-cols-[160px_1fr] sm:gap-4">
+      <dt className="text-xs font-medium text-fg-muted">{label}</dt>
+      <dd className="min-w-0 text-sm">{value}</dd>
+    </div>
+  );
+  return (
+    <Card className="p-4 lg:col-span-2">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="text-sm font-semibold">{t("Fiche du projet")}</div>
+        {!edit && (
+          <Button size="sm" variant="ghost" onClick={() => setEdit({ name: project.name, description: project.description })}>
+            <Pencil size={13} /> {t("Modifier")}
+          </Button>
+        )}
+      </div>
+      {edit ? (
+        <form
+          className="flex flex-col gap-3 pt-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!edit.name.trim()) return setError(t("Le nom du projet est obligatoire"));
+            try {
+              await crud.save("projects", { id: project.id, name: edit.name.trim(), description: edit.description });
+              setEdit(null);
+              setError(undefined);
+              onSaved();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        >
+          <ErrorNote>{error}</ErrorNote>
+          <Field label={t("Nom du projet")}>
+            <Input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+          </Field>
+          <Field label={t("Description")} hint={t("Objectif, utilisateurs, contraintes : les agents la lisent avant de travailler sur le projet.")}>
+            <Textarea rows={5} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => (setEdit(null), setError(undefined))}>
+              {t("Annuler")}
+            </Button>
+            <Button type="submit" variant="primary">
+              {t("Enregistrer")}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <dl className="divide-y divide-line">
+          {row(t("Nom"), <span className="font-medium">{project.name}</span>)}
+          {row(t("Description"), project.description ? <span className="whitespace-pre-wrap text-fg-muted">{project.description}</span> : <span className="text-fg-subtle">{t("Aucune description : ajoute-la pour aider l'équipe.")}</span>)}
+          {row(t("Dossier"), <code className="break-all font-mono text-xs">{project.path}</code>)}
+          {row(
+            t("Premiers contacts"),
+            leads.length ? (
+              <span className="flex flex-wrap gap-1.5">
+                {leads.map((a) => (
+                  <span key={a.id} className="flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-400/10 py-0.5 pl-1 pr-2 text-xs">
+                    <Avatar emoji={a.emoji} color={a.color} size={18} /> {a.name}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="text-fg-subtle">{t("Aucun : définis-en un dans l'onglet Équipe.")}</span>
+            ),
+          )}
+          {row(
+            t("Équipe"),
+            <span className="flex flex-wrap items-center gap-1">
+              {members.map((a) => (
+                <span key={a.id} title={`${a.name} · ${a.role}`}>
+                  <Avatar emoji={a.emoji} color={a.color} size={22} />
+                </span>
+              ))}
+              <span className="ml-1 text-xs text-fg-muted">{t("{n} agent(s)", { n: members.length })}</span>
+            </span>,
+          )}
+          {row(
+            t("Modules"),
+            <span className="flex flex-wrap items-center gap-1">
+              {mods.map((m) => (
+                <Badge key={m.id}>{t(m.label)}</Badge>
+              ))}
+              <button onClick={onModules} className="ml-1 text-xs text-accent hover:underline">
+                {t("Changer")}
+              </button>
+            </span>,
+          )}
+          {row(t("Créé le"), date(project.created_at))}
+          {row(t("Dernière modification"), date(project.updated_at))}
+        </dl>
+      )}
+    </Card>
+  );
+}
+
 function Overview({
-  projectId,
+  project,
   tasks,
   byId,
   ws,
   onTab,
   onFile,
   has,
+  onSaved,
+  onModules,
 }: {
-  projectId: string;
+  project: Project;
   tasks: Task[];
   byId: Map<string, Agent>;
   ws?: Workspace;
   onTab: (t: Tab) => void;
   onFile: (p: string) => void;
   has: (id: Parameters<typeof hasModule>[1]) => boolean;
+  onSaved: () => void;
+  onModules: () => void;
 }) {
   const { t, lang } = useT();
+  const projectId = project.id;
   const hasLog = ws?.entries.some((e) => e.path === "docs/DECISIONS.md");
   const log = useData<{ content: string }>(hasLog ? `/api/workspace?projectId=${projectId}&file=${encodeURIComponent("docs/DECISIONS.md")}` : null);
   const done = tasks.filter((x) => x.status === "done").length;
@@ -758,6 +882,7 @@ function Overview({
     .slice(0, 8);
   return (
     <div className="grid gap-4 p-6 lg:grid-cols-2">
+      <ProjectSheet project={project} byId={byId} onSaved={onSaved} onModules={onModules} />
       {has("board") && (
         <Card className="p-4 lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">

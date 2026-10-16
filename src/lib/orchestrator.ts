@@ -238,6 +238,8 @@ export async function runAgent(p: RunParams): Promise<string> {
 
     // Project resources: knowledge and MCP servers are granted per agent in the project's team settings.
     const project = p.ctx.projectId ? get<Project>("projects", p.ctx.projectId) : undefined;
+    // The project sheet (name + description) frames every answer; it changes rarely, so it stays in the stable part.
+    if (project) sys.push(`## Le projet\n« ${project.name} »${project.description ? ` : ${project.description.slice(0, 1500)}` : ""}`);
     const res = normalizeResources(project?.resources);
     // Knowledge sources: the agent's own bases (everywhere, incl. direct chats) + the project's, if granted.
     type Source = { kb_ids: string[]; tags: string[]; mode: "auto" | "tool"; top_k: number; hybrid: boolean; rerank: "none" | "mmr" | "llm" };
