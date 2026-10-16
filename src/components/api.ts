@@ -48,7 +48,7 @@ export type Team = {
   clarify: boolean;
   concert: boolean;
 };
-export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; updated_at: number };
+export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; modules: string[]; updated_at: number };
 export type Evaluation = { verdict: "valide" | "a_corriger"; score: number; comment: string; by: string; at: number };
 export type Skill = { id: string; name: string; description: string; content: string; category: string };
 export type Kb = { id: string; name: string; description: string };
