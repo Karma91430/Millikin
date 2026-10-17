@@ -145,9 +145,11 @@ function toAnthropic(messages: ChatMessage[]) {
 export async function anthropicChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
   const { system, messages } = toAnthropic(o.messages);
   const sys = o.schema || o.json ? `${system}\n\nRéponds uniquement avec un objet JSON valide${o.schema ? ` conforme à ce schéma : ${JSON.stringify(o.schema)}` : ""}, sans texte autour.` : system;
-  const body: Record<string, unknown> = { model: o.model, max_tokens: 8192, messages, stream: true, ...(sys ? { system: sys } : {}) };
+  // The instructions and the tools are the stable start of every call of a turn: mark them cacheable.
+  const body: Record<string, unknown> = { model: o.model, max_tokens: 8192, messages, stream: true, ...(sys ? { system: [{ type: "text", text: sys, cache_control: { type: "ephemeral" } }] } : {}) };
   if (o.temperature !== undefined) body.temperature = Math.min(1, o.temperature);
-  if (o.tools?.length) body.tools = o.tools.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
+  if (o.tools?.length)
+    body.tools = o.tools.map((t, i, all) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters, ...(i === all.length - 1 ? { cache_control: { type: "ephemeral" } } : {}) }));
   const r = await fetch(`${trimSlash(p.base_url)}/v1/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": p.api_key, "anthropic-version": "2023-06-01" },

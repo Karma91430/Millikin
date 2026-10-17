@@ -102,6 +102,8 @@ const COLUMNS: [string, string, string][] = [
   ["usage_logs", "project_id", "TEXT DEFAULT ''"],
   ["sprints", "review", "TEXT DEFAULT 'null'"],
   ["projects", "rigor", "TEXT DEFAULT 'standard'"],
+  // Short record of a finished task (files, tests, remarks), given to the tasks that depend on it.
+  ["tasks", "digest", "TEXT DEFAULT ''"],
   // Test bench run that owns the project (hidden from the lists); empty for real projects.
   ["projects", "bench", "TEXT DEFAULT ''"],
   // Kept out of the CRUD columns: the review's trace can be large and is only read by the traces view.
@@ -258,7 +260,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
     bool: ["needs_human"],
-    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id", "attempts", "needs_human"],
+    cols: ["team_id", "project_id", "title", "description", "status", "priority", "assignee_id", "created_by", "notes", "result", "evaluation", "trace", "depends_on", "complexity", "sprint_id", "attempts", "needs_human", "digest"],
     order: "created_at",
   },
   sprints: { table: "sprints", json: ["review"], bool: [], cols: ["project_id", "name", "goal", "start_date", "end_date", "status", "review"], order: "created_at", hidden: ["review_trace"] },
@@ -399,6 +401,8 @@ export type Task = {
   attempts: number;
   /** The automatic relaunches are exhausted: a person has to look at it. */
   needs_human: boolean;
+  /** Short record of the finished task for the tasks that depend on it. */
+  digest?: string;
   title: string;
   description: string;
   status: "todo" | "retry" | "doing" | "review" | "done";

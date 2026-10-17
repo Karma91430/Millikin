@@ -170,7 +170,7 @@ Dans le JSON ci-dessous, chaque lot est une entrée du tableau "tasks".
 Pour chaque lot : une consigne autonome (objectif, livrables, fichiers attendus), le membre le plus adapté, une priorité, une complexité en points (1, 2, 3, 5, 8 ou 13) et ses dépendances.
 ${opts.sprints ? "Regroupe les lots en sprints cohérents (2 à 4 sprints, chacun avec un objectif), en respectant les dépendances." : "Ne crée pas de sprint."}
 
-Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREMENT par un bloc JSON de cette forme :
+Réponds UNIQUEMENT par un bloc JSON de cette forme, sans explication autour (les consignes des lots portent tout ce qu'il faut savoir) :
 \`\`\`json
 {"sprints": [{"ref": "S1", "name": "Nom court qui décrit l'objectif du sprint", "goal": "…"}],
  "tasks": [{"ref": "T1", "title": "…", "description": "…", "assignee": "Nom du membre", "priority": "high|normal|low", "complexity": 3, "depends_on": [], "sprint": "S1"},

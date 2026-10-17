@@ -35,4 +35,11 @@ export const bench: Record<string, string> = {
   "Un outil CLI qui garde ses données dans un fichier JSON.": "A CLI tool that keeps its data in a JSON file.",
   "Rapport de ventes depuis un CSV": "Sales report from a CSV",
   "Un script qui lit un CSV fourni et produit un résumé JSON.": "A script that reads a given CSV and prints a JSON summary.",
+  "Équipe Millikin": "Millikin team",
+  "Moteur seul (référence)": "Engine alone (reference)",
+  Moteur: "Engine",
+  "Le scénario est confié directement à l'agent du moteur (sa CLI, ses outils), sans Millikin : c'est l'étalon pour mesurer le surcoût de la plateforme.":
+    "The scenario is handed directly to the engine's own agent (its CLI, its tools), without Millikin: the yardstick to measure the platform's overhead.",
+  "Choisir un modèle Claude Code ou Codex": "Pick a Claude Code or Codex model",
+  "moteur seul : {m}": "engine alone: {m}",
 };
