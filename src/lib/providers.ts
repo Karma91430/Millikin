@@ -223,20 +223,32 @@ function transcript(messages: ChatMessage[]) {
 }
 
 /** Hard limits per CLI call: a stuck or runaway generation must not freeze a task. */
-const CLI_TIMEOUT_MS = 5 * 60_000;
+// A long answer (a whole file) can take several minutes: only silence or a very long run means it is stuck.
+const CLI_IDLE_MS = 3 * 60_000;
+const CLI_TIMEOUT_MS = 15 * 60_000;
 const CLI_MAX_CHARS = 60_000;
 
 /**
  * Run a CLI and stream its stdout lines. `control.stop()` ends it early on purpose (the answer is
- * complete): the call then resolves normally. A timeout rejects.
+ * complete): the call then resolves normally. A timeout (no output for CLI_IDLE_MS, or CLI_TIMEOUT_MS in all) rejects.
+ * `describe` turns the last stdout lines into an error detail when the CLI exits with an error.
  */
-function runCli(cmd: string, args: string[], input: string, signal: AbortSignal | undefined, onLine: (line: string) => void, control: { stop?: () => void } = {}): Promise<void> {
+function runCli(
+  cmd: string,
+  args: string[],
+  input: string,
+  signal: AbortSignal | undefined,
+  onLine: (line: string) => void,
+  control: { stop?: () => void } = {},
+  describe?: (lastLines: string[]) => string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: process.env });
     let err = "";
     let buf = "";
     let stopped = false;
-    let timedOut = false;
+    let timedOut: "" | "idle" | "total" = "";
+    const tail: string[] = [];
     const abort = () => child.kill("SIGTERM");
     signal?.addEventListener("abort", abort);
     control.stop = () => {
@@ -244,28 +256,38 @@ function runCli(cmd: string, args: string[], input: string, signal: AbortSignal 
       child.kill("SIGTERM");
     };
     const timer = setTimeout(() => {
-      timedOut = true;
+      timedOut = "total";
       child.kill("SIGTERM");
     }, CLI_TIMEOUT_MS);
+    let idle = setTimeout(() => ((timedOut = "idle"), child.kill("SIGTERM")), CLI_IDLE_MS);
     child.stdout.on("data", (d: Buffer) => {
+      clearTimeout(idle);
+      idle = setTimeout(() => ((timedOut = "idle"), child.kill("SIGTERM")), CLI_IDLE_MS);
       buf += d.toString("utf8");
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (line.trim()) onLine(line);
+        if (!line.trim()) continue;
+        tail.push(line);
+        if (tail.length > 5) tail.shift();
+        try {
+          onLine(line);
+        } catch {}
       }
     });
     child.stderr.on("data", (d: Buffer) => (err += d.toString("utf8")));
     child.on("error", (e) => reject(new Error(`${cmd} introuvable ou impossible à lancer : ${e.message}`)));
     child.on("close", (code) => {
       clearTimeout(timer);
+      clearTimeout(idle);
       signal?.removeEventListener("abort", abort);
       if (buf.trim() && !stopped) onLine(buf);
       if (signal?.aborted) reject(new Error("Arrêté"));
       else if (stopped) resolve();
+      else if (timedOut === "idle") reject(new Error(`${cmd} : aucune sortie depuis ${CLI_IDLE_MS / 60_000} min`));
       else if (timedOut) reject(new Error(`${cmd} : pas de réponse complète après ${CLI_TIMEOUT_MS / 60_000} min`));
-      else if (code !== 0) reject(new Error(`${cmd} a échoué (code ${code}) : ${err.slice(-400) || "aucun détail"}`));
+      else if (code !== 0) reject(new Error(`${cmd} a échoué (code ${code}) : ${err.trim().slice(-400) || describe?.(tail) || tail.join(" ").slice(-400) || "aucun détail"}`));
       else resolve();
     });
     child.stdin.end(input);
@@ -328,6 +350,7 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", o.model, "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--setting-sources", ""];
     if (sys) args.push("--system-prompt", sys);
     let finalText = "";
+    let failure = "";
     await runCli(cmd, args, transcript(o.messages), o.signal, (line) => {
       let e: Record<string, unknown>;
       try {
@@ -338,13 +361,14 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
       const ev = e.event as { type?: string; delta?: { type?: string; text?: string } } | undefined;
       if (e.type === "stream_event" && ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) gate.push(ev.delta.text);
       if (e.type === "result") {
-        if (e.is_error) throw new Error(`Claude Code : ${String(e.result ?? e.subtype).slice(0, 300)}`);
+        if (e.is_error) failure = `Claude Code : ${String(e.result ?? e.subtype).slice(0, 300)}`;
         finalText = String(e.result ?? "");
         const u = e.usage as { input_tokens?: number; output_tokens?: number } | undefined;
         usage.prompt_tokens = u?.input_tokens ?? 0;
         usage.completion_tokens = u?.output_tokens ?? 0;
       }
-    }, control);
+    }, control, () => failure);
+    if (failure && !gate.text) throw new Error(failure);
     if (!gate.text && finalText) gate.push(finalText);
   } else {
     // Codex: non-interactive, read-only sandbox, JSON events; the final agent message is the answer.

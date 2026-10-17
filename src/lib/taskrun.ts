@@ -21,8 +21,10 @@ function parseEvaluation(text: string, by: string): Evaluation {
   if (blocks) {
     try {
       const j = JSON.parse(blocks[blocks.length - 1]) as { verdict?: string; score?: number; commentaire?: string; comment?: string };
-      const verdict = /corrig/i.test(String(j.verdict)) ? "a_corriger" : "valide";
-      return { verdict, score: Math.min(5, Math.max(1, Math.round(Number(j.score) || 3))), comment: String(j.commentaire ?? j.comment ?? "").slice(0, 1500), by, at: now() };
+      const score = Math.min(5, Math.max(1, Math.round(Number(j.score) || 3)));
+      // 4/5 or more means the work is there: remaining remarks are not worth another full attempt.
+      const verdict = /corrig/i.test(String(j.verdict)) && score < 4 ? "a_corriger" : "valide";
+      return { verdict, score, comment: String(j.commentaire ?? j.comment ?? "").slice(0, 1500), by, at: now() };
     } catch {}
   }
   // No JSON verdict: only an explicit "valide" without reservation counts; an empty or unclear review never validates.
@@ -36,6 +38,9 @@ function parseEvaluation(text: string, by: string): Evaluation {
     at: now(),
   };
 }
+
+/** Model steps for one attempt at a ticket: writing, running and fixing takes more than a chat turn. */
+const taskSteps = () => Math.max(Number(getSettings().task_max_steps) || 24, Number(getSettings().max_steps) || 8);
 
 const projectTasks = (projectId: string) => list<Task>("tasks").filter((t) => t.project_id === projectId);
 
@@ -180,14 +185,18 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
       let t = upsert<Task>("tasks", { id: task.id, status: "doing", attempts: 0, needs_human: false, notes: note(task, "Millikin", `▶ Lancée : ${assignee.name} s'en occupe.`) });
       const maxRetries = Math.max(0, Math.min(10, Number(getSettings().task_auto_retries) || 0));
       let lastError = "";
+      // Report of an attempt stopped by the step limit: the next one continues from there, without a review.
+      let carryOver = "";
+      let continuations = 0;
 
       // Loop: work → review; a rejected or failed attempt is relaunched with the feedback, up to maxRetries times.
       for (let attempt = 0; ; attempt++) {
         if (attempt > 0) {
-          t = upsert<Task>("tasks", { id: t.id, status: "doing", attempts: attempt, notes: note(t, "Millikin", `↻ Relance automatique ${attempt}/${maxRetries}`) });
+          t = upsert<Task>("tasks", { id: t.id, status: "doing", attempts: attempt, notes: carryOver ? t.notes : note(t, "Millikin", `↻ Relance automatique ${attempt}/${maxRetries}`) });
         }
-        const previous =
-          t.evaluation?.verdict === "a_corriger"
+        const previous = carryOver
+          ? `\n\n## Où tu en es\nLa tentative précédente s'est arrêtée faute d'étapes, voici son compte rendu. Continue à partir de là, sans refaire ce qui est fait :\n${carryOver}`
+          : t.evaluation?.verdict === "a_corriger"
             ? `\n\n## Retour du dernier contrôle à prendre en compte\n${t.evaluation.comment}`
             : lastError
               ? `\n\n## La tentative précédente a échoué\n${lastError}\nCorrige la cause avant de recommencer.`
@@ -195,19 +204,43 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
         const input = `Tâche du projet « ${project.name} » (#${t.id}) : ${t.title}\n\n${t.description || "(pas de description)"}${dependencyContext(t, projectTasks(project.id))}${previous}
 
 Réalise cette tâche maintenant. Si elle implique du code ou des documents, écris réellement les fichiers dans le dossier du projet.
+Priorité : d'abord chaque livrable et critère d'acceptation demandé (fichiers écrits, tests lancés), ensuite seulement les améliorations au-delà de la consigne.
 Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifiés (chemins), et les points d'attention.`;
 
         try {
           lastError = "";
           // The board is driven by the task run itself: the assignee must not add or move cards.
           const { actions, tap } = recorder(emit);
-          const result = await runAgent({ agent: assignee, input, team, phase: "execution", depth: 1, throwErrors: true, emit: tap, signal, ctx, excludeTools: BOARD_WRITE });
+          let stepLimit = false;
+          carryOver = "";
+          const result = await runAgent({
+            agent: assignee,
+            input,
+            team,
+            phase: "execution",
+            depth: 1,
+            throwErrors: true,
+            emit: tap,
+            signal,
+            ctx,
+            excludeTools: BOARD_WRITE,
+            maxSteps: taskSteps(),
+            onStepLimit: () => (stepLimit = true),
+          });
+          // Out of steps: a review would only say "unfinished". Continue directly (twice at most per launch).
+          if (stepLimit && continuations < 2 && !signal.aborted) {
+            continuations++;
+            carryOver = result.slice(0, 4000);
+            t = upsert<Task>("tasks", { id: t.id, status: "retry", notes: note(t, "Millikin", `⏭ ${assignee.name} a utilisé toutes ses étapes : la tâche continue là où elle s'est arrêtée.`) });
+            continue;
+          }
           t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
           const facts = await factsFor(actions, ctx.workspace, t, result);
 
           // Without a reviewer the task stays "En revue" for a person to check.
           if (reviewer) {
+            const lastReview = attempt > 0 && t.evaluation?.verdict === "a_corriger" ? t.evaluation.comment : "";
             const review = await runAgent({
               agent: reviewer,
               depth: 1,
@@ -230,13 +263,15 @@ ${result}
 
 ## Ce que Millikin a constaté (fait foi, relevé automatiquement)
 ${facts}
-
+${lastReview ? `\n## Corrections demandées au contrôle précédent\n${lastReview}\nVérifie d'abord qu'elles sont faites. N'ajoute pas de nouvelle exigence qui n'est pas dans la consigne.\n` : ""}
 Vérifie le TRAVAIL RÉEL, pas les intentions : juge d'après les fichiers et leur contenu ci-dessus (et lis-en d'autres si besoin), pas d'après le compte rendu.
 - Juge l'ÉTAT ACTUEL des livrables : s'ils existent et respectent la consigne, la tâche est faite, même si cette tentative n'a rien eu à réécrire.
 - Si un livrable demandé manque ou ne respecte pas la consigne, le verdict est « a_corriger » (dis précisément lequel et pourquoi).
 - Un compte rendu qui décrit ce qui « serait fait » sans que les fichiers le montrent est « a_corriger ».
 - Ne demande pas de recopier des sorties dans le compte rendu : les commandes exécutées et le contenu des fichiers sont dans les faits ci-dessus.
 - Vérifie aussi la conformité à la consigne, la cohérence avec les tâches dont elle dépend et les décisions du projet, la qualité, les oublis.
+- « a_corriger » seulement pour un défaut BLOQUANT : livrable absent, critère d'acceptation non rempli, code qui ne marche pas ou tests en échec, information fausse. Un détail de forme, une amélioration possible ou une précision en plus vont dans le commentaire avec le verdict « valide ».
+- Score : 5 = parfait, 4 = fait avec des remarques mineures (donc « valide »), 3 ou moins = un défaut bloquant à corriger.
 Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JSON :
 {"verdict": "valide" ou "a_corriger", "score": 1 à 5, "commentaire": "ce qui va / ce qu'il faut corriger"}`,
             });

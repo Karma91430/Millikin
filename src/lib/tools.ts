@@ -7,6 +7,37 @@ import { getSettings, list, newId, now, upsert, type Agent, type Task } from "./
 import type { ToolDef } from "./gateway";
 import { fetchUrl, httpRequest, webSearch } from "./webtools";
 
+/** Run a checker quietly: its error output, or "" when the file is fine (or the checker is missing). */
+const checkWith = (cmd: string, args: string[]) =>
+  new Promise<string>((resolve) =>
+    execFile(cmd, args, { timeout: 8000 }, (err, _out, stderr) => resolve(err && (err as NodeJS.ErrnoException).code !== "ENOENT" ? (stderr || err.message).trim().split("\n").slice(-4).join("\n") : "")),
+  );
+
+/**
+ * Checks after a write, returned with the tool result so the agent fixes problems in the same attempt:
+ * syntax of Python / JSON / JavaScript files, and a file that suddenly lost most of its lines (truncation).
+ */
+async function afterWrite(file: string, content: string, before: string | null): Promise<string> {
+  const notes: string[] = [];
+  const ext = path.extname(file).toLowerCase();
+  let error = "";
+  if (ext === ".json") {
+    try {
+      JSON.parse(content);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  } else if (ext === ".py") error = await checkWith("python3", ["-c", "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1])", file]);
+  else if ([".js", ".mjs", ".cjs"].includes(ext)) error = await checkWith("node", ["--check", file]);
+  if (error) notes.push(`⚠️ Erreur de syntaxe dans ce fichier : ${error}\nCorrige-le maintenant (relis-le avec read_file) avant de continuer.`);
+  if (before !== null) {
+    const was = before.split("\n").length;
+    const now = content.split("\n").length;
+    if (was >= 40 && now < was / 2) notes.push(`⚠️ Le fichier passe de ${was} à ${now} lignes : vérifie qu'aucune partie n'a été perdue (relis-le avec read_file).`);
+  }
+  return notes.length ? `\n${notes.join("\n")}` : "";
+}
+
 export type ToolContext = { agent: Agent; workspace: string; projectId: string; team: Agent[] };
 export type ToolImpl = (args: Record<string, unknown>) => Promise<string>;
 type Group = { id: string; label: string; description: string; danger?: boolean; defs: (ctx: ToolContext) => [ToolDef, ToolImpl][] };
@@ -174,8 +205,9 @@ export const TOOL_GROUPS: Group[] = [
           const p = await inside(ctx.workspace, String(a.path ?? ""));
           await fs.mkdir(path.dirname(p), { recursive: true });
           const content = String(a.content ?? "");
+          const before = await fs.readFile(p, "utf8").catch(() => null);
           await fs.writeFile(p, content, "utf8");
-          return `Fichier écrit : ${path.relative(ctx.workspace, p)} (${content.split("\n").length} lignes)`;
+          return `Fichier écrit : ${path.relative(ctx.workspace, p)} (${content.split("\n").length} lignes)${await afterWrite(p, content, before)}`;
         },
       ],
       [
@@ -194,8 +226,9 @@ export const TOOL_GROUPS: Group[] = [
           const newText = String(a.new_text ?? "");
           const n = text.split(oldText).length - 1;
           if (n === 1) {
-            await fs.writeFile(p, text.replace(oldText, newText), "utf8");
-            return `Fichier modifié : ${path.relative(ctx.workspace, p)}`;
+            const updated = text.replace(oldText, newText);
+            await fs.writeFile(p, updated, "utf8");
+            return `Fichier modifié : ${path.relative(ctx.workspace, p)}${await afterWrite(p, updated, text)}`;
           }
           // Small models rarely copy indentation exactly: retry on lines compared without surrounding spaces.
           if (n === 0) {
@@ -207,7 +240,7 @@ export const TOOL_GROUPS: Group[] = [
             if (hits.length === 1) {
               lines.splice(hits[0], want.length, ...newText.split("\n"));
               await fs.writeFile(p, lines.join("\n"), "utf8");
-              return `Fichier modifié : ${path.relative(ctx.workspace, p)} (passage retrouvé malgré une indentation différente)`;
+              return `Fichier modifié : ${path.relative(ctx.workspace, p)} (passage retrouvé malgré une indentation différente)${await afterWrite(p, lines.join("\n"), text)}`;
             }
           }
           return `Échec : le passage apparaît ${n} fois (il doit être unique et copié à l'identique depuis read_file). Relis le fichier, ou réécris-le entièrement avec write_file.`;

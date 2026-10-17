@@ -94,6 +94,10 @@ export type RunParams = {
   consultOnly?: boolean;
   /** Tools withheld for this run and its delegations (e.g. board edits during a task review). */
   excludeTools?: string[];
+  /** Model steps allowed for this agent's turn (default: the max_steps setting). Ticket work needs more. */
+  maxSteps?: number;
+  /** Called when the turn ends because it used all its steps (the work may be unfinished). */
+  onStepLimit?: () => void;
   /** Replaces the default scoping instructions (e.g. scoping before planning). */
   scopingNote?: string;
   emit: Emit;
@@ -344,25 +348,41 @@ export async function runAgent(p: RunParams): Promise<string> {
 
     const messages: ChatMessage[] = [{ role: "system", content: sys.join("\n\n") }, ...(p.history ?? []), { role: "user", content: p.input }];
     const toolsOk = resolveModel(agent.model).row?.supports_tools !== false;
-    const maxSteps = Math.max(1, Number(getSettings().max_steps) || 8);
+    const maxSteps = Math.max(1, p.maxSteps ?? (Number(getSettings().max_steps) || 8));
 
     let nudged = false;
     let carried = ""; // text already streamed before a nudge, kept in the final answer
     for (let step = 0; step < maxSteps; step++) {
       const last = step === maxSteps - 1;
+      // Last step: tools are withdrawn, so say it, or the agent describes what it "would do" next.
+      if (last && step > 0 && tools.length) {
+        p.onStepLimit?.();
+        messages.push({ role: "user", content: "Dernière étape : tu n'as plus accès aux outils. Termine par un compte rendu factuel : ce qui est réellement fait (fichiers, commandes et résultats) et ce qui reste à faire." });
+      }
       const stepStart = Date.now();
-      const res = await chatStream({
-        ref: agent.model,
-        messages,
-        tools: toolsOk && !last ? tools : undefined,
-        temperature: agent.temperature,
-        think: agent.think,
-        agentId: agent.id,
-        projectId: p.ctx.projectId || null,
-        signal,
-        onText: (text) => emit({ type: "text", callId, text }),
-        onReasoning: (text) => emit({ type: "reasoning", callId, text }),
-      });
+      const call = () =>
+        chatStream({
+          ref: agent.model,
+          messages,
+          tools: toolsOk && !last ? tools : undefined,
+          temperature: agent.temperature,
+          think: agent.think,
+          agentId: agent.id,
+          projectId: p.ctx.projectId || null,
+          signal,
+          onText: (text) => emit({ type: "text", callId, text }),
+          onReasoning: (text) => emit({ type: "reasoning", callId, text }),
+        });
+      let res: Awaited<ReturnType<typeof chatStream>>;
+      try {
+        res = await call();
+      } catch (e) {
+        // A model call that fails (timeout, CLI crash, network) is retried once: the turn keeps its progress.
+        if (signal?.aborted) throw e;
+        emit({ type: "text", callId, text: `\n\n_(${e instanceof Error ? e.message : String(e)} : nouvel essai)_\n\n` });
+        await new Promise((r) => setTimeout(r, 3000));
+        res = await call();
+      }
       emit({ type: "llm", callId, model: resolveModel(agent.model).ref, promptTokens: res.usage.prompt_tokens, completionTokens: res.usage.completion_tokens, ms: Date.now() - stepStart });
       if (!res.toolCalls.length) {
         // Small local models often announce an action ("je demande maintenant au développeur…") and stop.

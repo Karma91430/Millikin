@@ -195,6 +195,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   searxng_url: "http://127.0.0.1:8888",
   proxy_key: "",
   max_steps: "8",
+  /** Model steps for one attempt at a ticket (write, run, fix). */
+  task_max_steps: "24",
   num_ctx: "16384",
   think: "off",
   keep_alive: "10m",
