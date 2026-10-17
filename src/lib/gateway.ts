@@ -123,6 +123,13 @@ export { extractTextToolCalls };
 export type Think = "" | "on" | "off";
 
 /** Streaming chat with tool calls, thinking split and usage logging. */
+/**
+ * The engine refuses because a subscription, session or rate limit is reached (any provider). Retrying
+ * right away is useless: the work has to wait, and it is not a failure of the task.
+ */
+export const isQuotaError = (message: string) =>
+  /session limit|usage limit|rate.?limit|quota|too many requests|\b429\b|credit balance|limit reached|insufficient_quota|resets? (?:at )?\d/i.test(message);
+
 // Model forced for some agents during a test bench run, without touching the agents themselves.
 type ModelOverride = { byAgent: Record<string, string>; fallback?: string };
 const g3 = globalThis as unknown as { __millikinModelOverride?: AsyncLocalStorage<ModelOverride> };

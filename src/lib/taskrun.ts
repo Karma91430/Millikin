@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendDecision } from "./decisions";
 import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
+import { isQuotaError } from "./gateway";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
@@ -40,6 +41,8 @@ function parseEvaluation(text: string, by: string): Evaluation {
     at: now(),
   };
 }
+
+const QUOTA_NOTE = "⏸ Quota du moteur atteint :";
 
 /** Model steps for one attempt at a ticket: writing, running and fixing takes more than a chat turn. */
 const taskSteps = () => Math.max(Number(getSettings().task_max_steps) || 24, Number(getSettings().max_steps) || 8);
@@ -347,6 +350,18 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
           }
         } catch (e) {
           const message = signal.aborted ? "Arrêtée" : e instanceof Error ? e.message : String(e);
+          // Engine quota or rate limit: not a failure of the task. Back to the backlog without using a relaunch.
+          if (!signal.aborted && isQuotaError(message)) {
+            t = upsert<Task>("tasks", {
+              id: t.id,
+              status: "todo",
+              attempts: 0,
+              needs_human: false,
+              notes: note(t, "Millikin", `${QUOTA_NOTE} ${message}. La tâche n'est pas comptée comme un échec : relance-la quand le quota est revenu.`),
+            });
+            emit({ type: "error", message: `Quota du moteur atteint : ${message}` });
+            break;
+          }
           // A failure goes to "À relancer"; a manual stop simply returns to the backlog.
           t = upsert<Task>("tasks", { id: t.id, status: signal.aborted ? "todo" : "retry", notes: note(t, "Millikin", `⚠️ ${message}`) });
           emit({ type: "error", message });
@@ -425,6 +440,12 @@ export function startChainRun(projectId: string, opts: { parallel?: number; spri
           running.delete(id);
           const t = get<Task>("tasks", id)!;
           if (t.status === "done") return;
+          // Quota reached: the whole chain waits (the other tasks would hit the same limit).
+          const last = t.notes?.[t.notes.length - 1]?.text ?? "";
+          if (last.startsWith(QUOTA_NOTE)) {
+            failed ??= `quota du moteur atteint (${last.slice(QUOTA_NOTE.length).split(". La tâche")[0].trim()}). Relance la chaîne quand le quota est revenu`;
+            return;
+          }
           // The task run already relaunched it automatically; past that, a person has to look.
           failed ??= `« ${t.title} » n'a pas été validée${t.needs_human ? " après les relances automatiques" : ""}${t.evaluation ? ` : ${t.evaluation.comment.slice(0, 200)}` : ""}`;
         });
