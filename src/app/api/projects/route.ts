@@ -4,6 +4,7 @@ import { assertCanCreateProject, assertTeamSize, denied, guard, guardProject } f
 import { db, get, getSettings, list, upsert, type Agent, type Project, type Team } from "@/lib/db";
 import { ALL_MODULES } from "@/lib/modules";
 import { BUILTIN_PROFILES } from "@/lib/profiles";
+import { rigorOf } from "@/lib/rigor";
 import { specFromTeam } from "@/lib/team";
 import { slug } from "@/lib/tools";
 
@@ -23,7 +24,7 @@ function memberAgent(id: string): string | null {
  * built-in profiles) with their first contacts; `modules` lists the optional sections to show.
  */
 export async function POST(req: Request) {
-  const b = (await req.json()) as { name: string; description?: string; template_id?: string; path?: string; members?: string[]; entries?: string[]; modules?: string[] };
+  const b = (await req.json()) as { name: string; description?: string; template_id?: string; path?: string; members?: string[]; entries?: string[]; modules?: string[]; rigor?: string };
   if (!b.name?.trim()) return Response.json({ error: "Le nom du projet est obligatoire" }, { status: 400 });
   let user;
   try {
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     for (let i = 2; fs.existsSync(dir) && fs.readdirSync(dir).length; i++) dir = `${base}-${i}`;
   }
   fs.mkdirSync(dir, { recursive: true });
-  const project = upsert<Project>("projects", { name: b.name.trim(), description: b.description ?? "", path: dir, template_id: template?.id ?? "", team: spec, modules: modules.length ? modules : ALL_MODULES, owner_id: user?.id ?? "" });
+  const project = upsert<Project>("projects", { name: b.name.trim(), description: b.description ?? "", path: dir, template_id: template?.id ?? "", team: spec, modules: modules.length ? modules : ALL_MODULES, owner_id: user?.id ?? "", rigor: rigorOf(b) });
   return Response.json(project);
 }
 

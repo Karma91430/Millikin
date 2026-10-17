@@ -1,11 +1,11 @@
 // Project planning: the lead first contact (with the other first contacts) breaks the project into
 // sprints and tasks with assignee, complexity, priority and dependencies; Millikin creates them.
-import fs from "node:fs/promises";
-import path from "node:path";
 import { appendDecision } from "./decisions";
 import { get, list, newId, now, remove, upsert, type Agent, type Project, type Sprint, type Task } from "./db";
 import { complete } from "./gateway";
 import { runAgent, slugify, teamRuntime } from "./orchestrator";
+import { projectMap } from "./projectmap";
+import { PLANNING_RIGOR, rigorOf } from "./rigor";
 import { activeRunFor, startRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
 import { toPoints, workspaceFor } from "./tools";
@@ -13,22 +13,6 @@ import { toPoints, workspaceFor } from "./tools";
 type PlanTask = { ref?: string; title?: string; description?: string; assignee?: string; priority?: string; complexity?: number; depends_on?: string[]; sprint?: string };
 type PlanSprint = { ref?: string; name?: string; goal?: string };
 type Plan = { sprints?: PlanSprint[]; tasks?: PlanTask[] };
-
-const IGNORED = new Set(["node_modules", ".git", ".next", "dist", "build", ".venv", "venv", "__pycache__", ".DS_Store"]);
-
-async function fileTree(root: string, max = 80): Promise<string[]> {
-  const out: string[] = [];
-  const walk = async (dir: string) => {
-    for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      if (IGNORED.has(e.name) || out.length >= max) continue;
-      const rel = path.relative(root, path.join(dir, e.name));
-      out.push(e.isDirectory() ? `${rel}/` : rel);
-      if (e.isDirectory()) await walk(path.join(dir, e.name));
-    }
-  };
-  await walk(root);
-  return out;
-}
 
 /** Small models add comments, "…" placeholders or trailing commas to JSON: clean them up. */
 const lenient = (c: string) =>
@@ -83,6 +67,7 @@ type SubTask = { title?: string; description?: string; assignee?: string; comple
  * are carried by its first sub-tasks (pointing at the last sub-tasks of the lots it depends on).
  */
 async function refineLots(opts: { lots: PlanTask[]; granularity: Exclude<Granularity, "macro">; project: Project; members: Agent[]; model?: string; emit: Emit; signal: AbortSignal }) {
+  const fullMethod = rigorOf(opts.project) === "entreprise";
   const { lots, granularity, project, members, emit, signal } = opts;
   const g = SPLIT[granularity];
   const callId = newId();
@@ -110,7 +95,7 @@ ${lot.description ?? ""}
 Responsable proposé : ${lot.assignee ?? "non défini"}
 Membres disponibles : ${members.map((m) => `${m.name} (${m.role})`).join(", ")}
 
-Découpe ce lot en ${g.count} tâches de ${g.size} chacune, dans l'ordre de réalisation. Chaque tâche a une consigne autonome (objectif, livrable, fichiers), le membre le plus adapté (souvent le responsable du lot, mais les tests, la relecture ou la documentation peuvent revenir à un autre membre), une complexité (${g.points}) et "after" : les numéros (à partir de 1) des tâches de ce lot qui doivent être terminées avant.
+Découpe ce lot en ${g.count} tâches de ${g.size} chacune, dans l'ordre de réalisation. Chaque tâche a une consigne autonome (objectif, livrable, fichiers), le membre le plus adapté (souvent le responsable du lot, mais les tests${fullMethod ? ", la relecture" : ""} ou la documentation peuvent revenir à un autre membre)${fullMethod ? "" : ". Pas de tâche dont le seul objet est de relire ou de valider : chaque tâche est déjà contrôlée"}, une complexité (${g.points}) et "after" : les numéros (à partir de 1) des tâches de ce lot qui doivent être terminées avant.
 Format : {"tasks": [{"title": "…", "description": "…", "assignee": "Nom", "complexity": 2, "after": []}, {"title": "…", "description": "…", "assignee": "Nom", "complexity": 2, "after": [1]}]}`,
           },
         ],
@@ -160,7 +145,8 @@ export async function planProject(opts: { project: Project; brief?: string; spri
   const existing = list<Task>("tasks").filter((t) => t.project_id === projectId);
   const sprints = list<Sprint>("sprints").filter((s) => s.project_id === projectId);
   const openSprints = sprints.filter((s) => s.status !== "done");
-  const tree = await fileTree(workspace);
+  const map = await projectMap(workspace);
+  const rigor = rigorOf(project);
 
   const input = `Planifie le projet « ${project.name} ».
 ${project.description ? `\nDescription : ${project.description}\n` : ""}${opts.brief ? `\nCadrage avec l'utilisateur (à respecter) :\n${opts.brief}\n` : ""}
@@ -170,8 +156,10 @@ ${members.map((m) => `- ${m.name} : ${m.role}`).join("\n")}
 Tâches déjà présentes (ne les recrée pas) :
 ${existing.length ? existing.map((t) => `- [${t.status}] ${t.title}`).join("\n") : "(aucune)"}
 ${openSprints.length ? `\nSprints déjà ouverts (réutilise exactement leur nom dans "sprint" s'ils conviennent, sans les recréer) :\n${openSprints.map((sp) => `- ${sp.name}${sp.goal ? ` : ${sp.goal}` : ""}`).join("\n")}\n` : ""}
-Fichiers du projet :
-${tree.length ? tree.join("\n") : "(dossier vide)"}
+Carte du projet (fichiers existants) :
+${map || "(dossier vide)"}
+
+${PLANNING_RIGOR[rigor]}
 
 Découpe le travail restant en lots distincts et concrets, chacun confié à un seul membre${opts.granularity === "macro" ? "" : " (chaque lot sera ensuite découpé en tâches plus courtes)"}. Méthode :
 1. Liste d'abord tous les livrables et fonctionnalités du périmètre, puis le travail de chaque membre concerné (conception, développement, données, tests, documentation…).
@@ -209,7 +197,8 @@ Réponds par une courte explication de ton découpage, puis termine OBLIGATOIREM
   });
   const plan = [answer, ...answers.reverse()].map(tryParsePlan).find((p) => p?.tasks?.length);
   if (!plan) throw new Error("Le plan n'a pas pu être lu (JSON attendu). Relance la planification.");
-  const granularity = opts.granularity ?? "standard";
+  // A prototype keeps its lots as tasks: splitting them would bring the ceremony back.
+  const granularity = rigor === "prototype" ? "macro" : (opts.granularity ?? "standard");
   if (granularity !== "macro" && plan.tasks?.length)
     plan.tasks = await refineLots({ lots: plan.tasks.filter((t) => t.title), granularity, project, members, model: planner.model, emit, signal });
 

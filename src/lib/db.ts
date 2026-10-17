@@ -96,6 +96,7 @@ const COLUMNS: [string, string, string][] = [
   ["tasks", "sprint_id", "TEXT DEFAULT ''"],
   ["usage_logs", "project_id", "TEXT DEFAULT ''"],
   ["sprints", "review", "TEXT DEFAULT 'null'"],
+  ["projects", "rigor", "TEXT DEFAULT 'standard'"],
   // Kept out of the CRUD columns: the review's trace can be large and is only read by the traces view.
   ["sprints", "review_trace", "TEXT DEFAULT 'null'"],
   ["kb_docs", "tags", "TEXT DEFAULT '[]'"],
@@ -245,7 +246,7 @@ export const ENTITIES: Record<string, EntityDef> = {
     cols: ["name", "description", "lead_id", "member_ids", "workspace", "links", "entry_ids", "layout", "clarify", "concert"],
     order: "created_at",
   },
-  projects: { table: "projects", json: ["team", "resources", "modules"], bool: [], cols: ["name", "description", "path", "template_id", "team", "resources", "modules", "owner_id"], order: "updated_at DESC" },
+  projects: { table: "projects", json: ["team", "resources", "modules"], bool: [], cols: ["name", "description", "path", "template_id", "team", "resources", "modules", "owner_id", "rigor"], order: "updated_at DESC" },
   tasks: {
     table: "tasks",
     json: ["notes", "evaluation", "trace", "depends_on"],
@@ -373,7 +374,7 @@ export type Team = {
   clarify: boolean;
   concert: boolean;
 };
-export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; modules: string[] };
+export type Project = { id: string; name: string; description: string; path: string; template_id: string; team: TeamSpec; resources: ProjectResources; modules: string[]; rigor?: string };
 export type Evaluation = { verdict: "valide" | "a_corriger"; score: number; comment: string; by: string; at: number };
 export type Task = {
   id: string;
