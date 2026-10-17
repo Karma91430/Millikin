@@ -24,7 +24,18 @@ function projectOf(entity: string, row: Record<string, unknown> | undefined): st
   return undefined;
 }
 
-function visibleRows(u: User | null, entity: string, rows: Record<string, unknown>[]) {
+/** Test bench projects (and their tasks and sprints) never show up in the lists. */
+function withoutBench(entity: string, rows: Record<string, unknown>[]) {
+  if (entity === "projects") return rows.filter((p) => !p.bench);
+  if (entity === "tasks" || entity === "sprints") {
+    const bench = new Set(list<Project & { bench?: string }>("projects").filter((p) => p.bench).map((p) => p.id));
+    return bench.size ? rows.filter((r) => !bench.has(String(r.project_id ?? ""))) : rows;
+  }
+  return rows;
+}
+
+function visibleRows(u: User | null, entity: string, all: Record<string, unknown>[]) {
+  const rows = withoutBench(entity, all);
   if (!u || u.role === "admin") return rows;
   if (entity === "projects") return rows.filter((p) => canSeeProject(u, p as { id: string; owner_id?: string }));
   if (entity === "tasks" || entity === "sprints") {

@@ -2,7 +2,7 @@ import { allowedToolGroups } from "./access";
 import { stripTextToolCalls } from "./toolcalls";
 import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
-import { chatStream, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
+import { chatStream, effectiveModel, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 import { callMcpTool, listMcpTools } from "./mcp";
 import { search, tagCounts } from "./rag";
 import { normalizeAgentRag, normalizeResources } from "./resources";
@@ -349,7 +349,7 @@ export async function runAgent(p: RunParams): Promise<string> {
     sys.push(...dynamic);
 
     const messages: ChatMessage[] = [{ role: "system", content: sys.join("\n\n") }, ...(p.history ?? []), { role: "user", content: p.input }];
-    const toolsOk = resolveModel(agent.model).row?.supports_tools !== false;
+    const toolsOk = resolveModel(effectiveModel(agent.id, agent.model)).row?.supports_tools !== false;
     const maxSteps = Math.max(1, p.maxSteps ?? (Number(getSettings().max_steps) || 8));
 
     let nudged = false;
@@ -386,7 +386,7 @@ export async function runAgent(p: RunParams): Promise<string> {
         await new Promise((r) => setTimeout(r, 3000));
         res = await call();
       }
-      emit({ type: "llm", callId, model: resolveModel(agent.model).ref, promptTokens: res.usage.prompt_tokens, completionTokens: res.usage.completion_tokens, ms: Date.now() - stepStart });
+      emit({ type: "llm", callId, model: resolveModel(effectiveModel(agent.id, agent.model)).ref, promptTokens: res.usage.prompt_tokens, completionTokens: res.usage.completion_tokens, ms: Date.now() - stepStart });
       if (!res.toolCalls.length) {
         // Small local models often announce an action ("je demande maintenant au développeur…") and stop.
         // Nudge once so the announced step actually runs (not during scoping, where asking is the goal).
@@ -435,7 +435,7 @@ export async function runAgent(p: RunParams): Promise<string> {
           return { id: tc.id, out };
         }),
       );
-      const limit = toolResultLimit(agent.model);
+      const limit = toolResultLimit(effectiveModel(agent.id, agent.model));
       for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: clip(r.out, limit) });
     }
     return "(limite d'étapes atteinte)";

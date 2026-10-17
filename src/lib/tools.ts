@@ -4,12 +4,12 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getSettings, list, newId, now, upsert, type Agent, type Task } from "./db";
-import { resolveModel, type ToolDef } from "./gateway";
+import { effectiveModel, resolveModel, type ToolDef } from "./gateway";
 import { isIgnoredEntry } from "./projectmap";
 import { fetchUrl, httpRequest, webSearch } from "./webtools";
 
 /** Size of one read_file chunk: fits in the tool results the orchestrator keeps for this agent's engine (6000 / 20000). */
-const readChunk = (agent: Agent) => (resolveModel(agent.model).provider.type === "ollama" ? 5500 : 18000);
+const readChunk = (agent: Agent) => (resolveModel(effectiveModel(agent.id, agent.model)).provider.type === "ollama" ? 5500 : 18000);
 
 /** Run a checker quietly: its error output, or "" when the file is fine (or the checker is missing). */
 const checkWith = (cmd: string, args: string[]) =>
