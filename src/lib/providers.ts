@@ -160,7 +160,7 @@ export async function anthropicChat(p: Provider, o: ChatOpts): Promise<StreamRes
   const blocks = new Map<number, { id: string; name: string; json: string }>();
   await readSSE(r.body, (j) => {
     if (j.type === "error") throw new Error(`${p.name} : ${JSON.stringify(j.error).slice(0, 300)}`);
-    if (j.type === "message_start") usage.prompt_tokens = Number((j.message as { usage?: { input_tokens?: number } })?.usage?.input_tokens ?? 0);
+    if (j.type === "message_start") usage.prompt_tokens = contextTokens((j.message as { usage?: ClaudeUsage })?.usage ?? {});
     if (j.type === "message_delta") usage.completion_tokens = Number((j.usage as { output_tokens?: number })?.output_tokens ?? 0);
     if (j.type === "content_block_start") {
       const b = j.content_block as { type: string; id?: string; name?: string };
@@ -333,6 +333,10 @@ function textGate(onText?: (t: string) => void, onDone?: () => void) {
   };
 }
 
+type ClaudeUsage = { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };
+/** Claude Code caches the conversation: the input is mostly in the cache fields, input_tokens alone is only the new part. */
+const contextTokens = (u: ClaudeUsage) => (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+
 export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
   const type = p.type as ProviderType;
   const system = o.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
@@ -358,13 +362,15 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
       } catch {
         return;
       }
-      const ev = e.event as { type?: string; delta?: { type?: string; text?: string } } | undefined;
+      const ev = e.event as { type?: string; delta?: { type?: string; text?: string }; message?: { usage?: ClaudeUsage } } | undefined;
       if (e.type === "stream_event" && ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) gate.push(ev.delta.text);
+      // The context size is known from the start: kept even when the generation is stopped early.
+      if (e.type === "stream_event" && ev?.type === "message_start" && ev.message?.usage) usage.prompt_tokens = contextTokens(ev.message.usage);
       if (e.type === "result") {
         if (e.is_error) failure = `Claude Code : ${String(e.result ?? e.subtype).slice(0, 300)}`;
         finalText = String(e.result ?? "");
-        const u = e.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-        usage.prompt_tokens = u?.input_tokens ?? 0;
+        const u = e.usage as ClaudeUsage | undefined;
+        if (u) usage.prompt_tokens = contextTokens(u);
         usage.completion_tokens = u?.output_tokens ?? 0;
       }
     }, control, () => failure);
