@@ -4,8 +4,11 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getSettings, list, newId, now, upsert, type Agent, type Task } from "./db";
-import type { ToolDef } from "./gateway";
+import { resolveModel, type ToolDef } from "./gateway";
 import { fetchUrl, httpRequest, webSearch } from "./webtools";
+
+/** Size of one read_file chunk: fits in the tool results the orchestrator keeps for this agent's engine (6000 / 20000). */
+const readChunk = (agent: Agent) => (resolveModel(agent.model).provider.type === "ollama" ? 5500 : 18000);
 
 /** Run a checker quietly: its error output, or "" when the file is fine (or the checker is missing). */
 const checkWith = (cmd: string, args: string[]) =>
@@ -185,11 +188,24 @@ export const TOOL_GROUPS: Group[] = [
         },
       ],
       [
-        fn("read_file", "Lire un fichier texte du dossier de travail.", { path: str("chemin relatif") }, ["path"]),
+        fn(
+          "read_file",
+          "Lire un fichier texte du dossier de travail. Un long fichier est rendu par morceaux : lis la suite avec start_line.",
+          { path: str("chemin relatif"), start_line: { type: "integer", description: "première ligne à lire (1 par défaut)" } },
+          ["path"],
+        ),
         async (a) => {
           const p = await inside(ctx.workspace, String(a.path ?? ""));
-          const text = await fs.readFile(p, "utf8");
-          return text.length > 20000 ? text.slice(0, 20000) + `\n… (tronqué, ${text.length} caractères)` : text;
+          const lines = (await fs.readFile(p, "utf8")).split("\n");
+          const start = Math.min(Math.max(1, Math.floor(Number(a.start_line) || 1)), Math.max(1, lines.length));
+          // A chunk that fits in a tool result; the end is always announced, so a partial view is never mistaken for the whole file.
+          const chunk = readChunk(ctx.agent);
+          let end = start - 1;
+          let size = 0;
+          while (end < lines.length && (end === start - 1 || size + lines[end].length + 1 <= chunk)) size += lines[end++].length + 1;
+          const body = lines.slice(start - 1, end).join("\n");
+          if (start === 1 && end >= lines.length) return body;
+          return `${body}\n… [lignes ${start} à ${end} sur ${lines.length}${end < lines.length ? ` : lis la suite avec read_file start_line=${end + 1}` : ""}]`;
         },
       ],
     ],

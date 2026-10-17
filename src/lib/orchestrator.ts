@@ -18,7 +18,9 @@ type ToolImpl = (args: Record<string, unknown>, toolCallId: string) => Promise<s
 /** cadrage: entries analyse and ask questions, no delegation · execution: approved, delegate and review · free: no phases */
 export type Phase = "cadrage" | "execution" | "free";
 
-const MAX_TOOL_RESULT = 6000;
+/** Tool results kept in the conversation: small local contexts get less. A cut is always announced. */
+const toolResultLimit = (ref: string | null | undefined) => (resolveModel(ref).provider.type === "ollama" ? 6000 : 20000);
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n… [résultat tronqué : ${max} caractères affichés sur ${text.length}]` : text);
 const MAX_DEPTH = 4;
 const ANNOUNCES_ACTION = /\b(je (vais|demande|délègue|lance|transmets|passe la main|contacte|sollicite)|maintenant,? je|je m'en occupe|laisse-moi)\b/i;
 
@@ -351,6 +353,7 @@ export async function runAgent(p: RunParams): Promise<string> {
     const maxSteps = Math.max(1, p.maxSteps ?? (Number(getSettings().max_steps) || 8));
 
     let nudged = false;
+    let nudgedEmpty = false;
     let carried = ""; // text already streamed before a nudge, kept in the final answer
     for (let step = 0; step < maxSteps; step++) {
       const last = step === maxSteps - 1;
@@ -397,6 +400,13 @@ export async function runAgent(p: RunParams): Promise<string> {
         }
         // A final answer that is only a tool call written as text is not an answer: drop the raw block.
         const text = stripTextToolCalls(res.content);
+        // An empty answer mid-task (it happens with CLI engines) is not a conclusion: ask once to go on.
+        if (!text.trim() && !carried && !nudgedEmpty && !last && tools.length) {
+          nudgedEmpty = true;
+          messages.push({ role: "assistant", content: res.content || "(réponse vide)" });
+          messages.push({ role: "user", content: "Ta réponse est vide. Continue la tâche avec les outils, ou donne ton compte rendu final si tout est fait." });
+          continue;
+        }
         const content = (carried + text).trim() || "(pas de réponse : l'agent s'est arrêté sans conclure)";
         emit({ type: "agent_end", callId, content });
         return content;
@@ -425,7 +435,8 @@ export async function runAgent(p: RunParams): Promise<string> {
           return { id: tc.id, out };
         }),
       );
-      for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: r.out.slice(0, MAX_TOOL_RESULT) });
+      const limit = toolResultLimit(agent.model);
+      for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: clip(r.out, limit) });
     }
     return "(limite d'étapes atteinte)";
   } catch (e) {
