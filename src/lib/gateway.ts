@@ -1,6 +1,7 @@
 // Model gateway. Ollama (the default, local) is reached through its native API, which lets us set
 // num_ctx and toggle thinking; other providers (OpenAI-compatible, Anthropic, Claude Code, Codex) go
 // through the adapters in providers.ts with the same contract: streamed text, tool calls, usage.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { db, getSettings, list, logUsage, newId, type ModelRow, type Provider } from "./db";
 import { anthropicChat, cliChat, listProviderModels, openaiChat, openaiEmbed, PROVIDER_PRESETS } from "./providers";
 import { CALL_OPEN, extractTextToolCalls } from "./toolcalls";
@@ -122,6 +123,18 @@ export { extractTextToolCalls };
 export type Think = "" | "on" | "off";
 
 /** Streaming chat with tool calls, thinking split and usage logging. */
+// Model forced for some agents during a test bench run, without touching the agents themselves.
+type ModelOverride = { byAgent: Record<string, string>; fallback?: string };
+const g3 = globalThis as unknown as { __millikinModelOverride?: AsyncLocalStorage<ModelOverride> };
+const overrides = () => (g3.__millikinModelOverride ??= new AsyncLocalStorage());
+export const withModelOverride = <T>(o: ModelOverride, fn: () => Promise<T>) => overrides().run(o, fn);
+/** The model an agent really uses: its own, unless a bench run forces another one. */
+export function effectiveModel(agentId: string | null | undefined, ref: string | null | undefined) {
+  const o = overrides().getStore();
+  if (!o) return ref;
+  return (agentId && o.byAgent[agentId]) || (!agentId && o.fallback) || ref;
+}
+
 export async function chatStream(opts: {
   ref?: string | null;
   messages: ChatMessage[];
@@ -139,7 +152,7 @@ export async function chatStream(opts: {
   onText?: (t: string) => void;
   onReasoning?: (t: string) => void;
 }): Promise<StreamResult> {
-  const res = resolveModel(opts.ref);
+  const res = resolveModel(effectiveModel(opts.agentId, opts.ref));
   const s = getSettings();
   if (res.provider.type !== "ollama") return otherChat(res, opts);
   const caps = await capabilities(res.provider, res.model);

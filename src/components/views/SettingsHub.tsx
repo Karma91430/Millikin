@@ -1,15 +1,16 @@
 "use client";
 
-import { Check, Cloud, Cpu, Gauge, Languages, Laptop, Settings, TerminalSquare } from "lucide-react";
+import { Check, Cloud, Cpu, FlaskConical, Gauge, Languages, Laptop, Settings, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import { LANGS, useT } from "@/i18n";
 import { api, useData, type Meta, type Provider } from "../api";
 import { Badge, Button, Card, cx, Select } from "../ui";
+import { BenchView } from "./BenchView";
 import { MachineView } from "./MachineView";
 import { ModelsView } from "./ModelsView";
 import { SettingsView } from "./SettingsView";
 
-type Tab = "engine" | "general" | "models" | "machine";
+type Tab = "engine" | "general" | "models" | "machine" | "bench";
 
 // How each kind of provider is presented to the user.
 const KIND: Record<string, { label: string; hint: string; icon: typeof Cpu }> = {
@@ -143,6 +144,7 @@ export function SettingsHub({ meta, onMetaChange }: { meta: Meta; onMetaChange: 
     ["general", "Général", Settings],
     ["models", "Modèles et fournisseurs", Cloud],
     ["machine", "Machine", Gauge],
+    ["bench", "Banc d'essai", FlaskConical],
   ];
   return (
     <div className="flex h-full flex-col">
@@ -173,6 +175,7 @@ export function SettingsHub({ meta, onMetaChange }: { meta: Meta; onMetaChange: 
         )}
         {tab === "models" && <ModelsView key={modelsTab} onChange={onMetaChange} initialTab={modelsTab} />}
         {tab === "machine" && <MachineView onChange={onMetaChange} />}
+        {tab === "bench" && <BenchView meta={meta} />}
       </div>
     </div>
   );
