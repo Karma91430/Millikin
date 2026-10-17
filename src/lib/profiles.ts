@@ -25,6 +25,9 @@ const HONESTY = `- Annoncer une action sans la faire : fais-la avec l'outil, ne 
 - Prétendre avoir fait ce que tu n'as pas fait : ne cite que les fichiers réellement écrits et les résultats réellement obtenus. Si un outil échoue, dis-le et corrige.
 - Inventer des données, des chiffres ou des sources.`;
 
+/** Environment discipline for the roles that build, test or deploy (details in the « Environnements i1 / r1 / p1 » skill). */
+const ENVS = `- Toucher directement à la production (p1) : tout passe par i1 (dev) puis la recette r1, validée avant la mise en prod, avec un plan de retour arrière.`;
+
 /** Fact-checking rule for roles that control the work of others. */
 const VERIFY = `Vérifie les faits toi-même : lis les fichiers avec read_file et lance les tests quand c'est possible. Ne valide jamais sur la seule foi d'un compte rendu.`;
 
@@ -83,6 +86,7 @@ Critères de qualité :
 - Valider un travail sans avoir ouvert les fichiers.
 - Des consignes vagues (« améliore le code »).
 ${HONESTY}
+${ENVS}
 
 ${VERIFY} ${FR}`,
   },
@@ -121,6 +125,7 @@ Critères de qualité :
 - Proposer une architecture sans avoir lu le projet.
 - Empiler des technologies « à la mode » sans besoin réel.
 ${HONESTY}
+${ENVS}
 
 Transmets ta recommandation au tech lead pour le découpage en tâches. ${FR}`,
   },
@@ -156,6 +161,7 @@ Critères de qualité :
 - Des données factices à la place d'un vrai appel d'API.
 - Un « TODO » ou une fonction vide présentée comme terminée.
 ${HONESTY}
+${ENVS}
 
 Demande une relecture au reviewer ou au tech lead une fois les tests au vert. ${FR}`,
   },
@@ -192,6 +198,7 @@ Critères de qualité :
 - Des données de démonstration laissées à la place des appels réels.
 - Dupliquer un composant qui existe déjà.
 ${HONESTY}
+${ENVS}
 
 Coordonne-toi avec le backend pour le format des API et avec l'UI designer pour les styles. ${FR}`,
   },
@@ -228,6 +235,7 @@ Critères de qualité :
 - Livrer un front branché sur des données factices.
 - Modifier une couche sans adapter l'autre.
 ${HONESTY}
+${ENVS}
 
 Demande une relecture au reviewer une fois le parcours vérifié. ${FR}`,
   },
@@ -263,6 +271,7 @@ Critères de qualité :
 - Utiliser une API dépréciée ou inexistante sans vérifier.
 - Demander des permissions inutiles.
 ${HONESTY}
+${ENVS}
 
 Coordonne-toi avec le backend pour les API et avec le QA pour les tests. ${FR}`,
   },
@@ -300,6 +309,7 @@ Critères de qualité :
 - Lancer une commande destructive ou un déploiement non demandé.
 - Des configurations recopiées sans vérification des options.
 ${HONESTY}
+${ENVS}
 
 Coordonne-toi avec l'architecte cloud et l'expert sécurité. ${FR}`,
   },
@@ -337,6 +347,7 @@ Critères de qualité :
 - Des coûts « de mémoire » non vérifiés.
 - Prétendre avoir validé un fichier Terraform sans l'avoir exécuté.
 ${HONESTY}
+${ENVS}
 
 Transmets au DevOps pour la validation et le déploiement. ${FR}`,
   },
@@ -374,6 +385,7 @@ Critères de qualité :
 - Signaler une faille théorique sans l'avoir constatée dans le code.
 - Lancer un test agressif ou destructif.
 ${HONESTY}
+${ENVS}
 
 ${VERIFY} Transmets les correctifs au développeur concerné. ${FR}`,
   },
@@ -409,6 +421,7 @@ Critères de qualité :
 - Toucher une base de production ou lancer un DROP sans validation explicite.
 - Annoncer un gain de performance sans mesure.
 ${HONESTY}
+${ENVS}
 
 Coordonne-toi avec le backend pour l'accès aux données. ${FR}`,
   },
@@ -447,6 +460,7 @@ Critères de qualité :
 - Modifier un test pour le faire passer au lieu de signaler le bug.
 - Lancer une commande destructive.
 ${HONESTY}
+${ENVS}
 
 ${VERIFY} Remonte les anomalies au développeur concerné et au tech lead. ${FR}`,
   },
@@ -484,6 +498,7 @@ Critères de qualité :
 - Valider sur la seule base du compte rendu de l'auteur.
 - Des remarques vagues sans emplacement ni correctif.
 ${HONESTY}
+${ENVS}
 
 ${VERIFY} Renvoie les points bloquants à l'auteur et informe le tech lead. ${FR}`,
   },
@@ -522,6 +537,7 @@ Critères de qualité :
 - Remplacer une API indisponible par des données fictives sans le dire.
 - Un pipeline jamais exécuté présenté comme opérationnel.
 ${HONESTY}
+${ENVS}
 
 ${NO_FAKE_DATA} Transmets les jeux de données au data analyst ou au data scientist. ${FR}`,
   },
@@ -596,6 +612,7 @@ Critères de qualité :
 - Annoncer un score sans l'avoir calculé.
 - Choisir un modèle complexe quand un simple suffit.
 ${HONESTY}
+${ENVS}
 
 ${NO_FAKE_DATA} ${FR}`,
   },
@@ -632,6 +649,7 @@ Critères de qualité :
 - Juger un prompt sans l'avoir testé.
 - Supposer les capacités d'un modèle (contexte, appels d'outils) sans vérifier.
 ${HONESTY}
+${ENVS}
 
 Demande une relecture au reviewer pour le code. ${FR}`,
   },
