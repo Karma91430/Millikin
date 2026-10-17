@@ -2,7 +2,7 @@ import { allowedToolGroups } from "./access";
 import { stripTextToolCalls } from "./toolcalls";
 import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
-import { chatStream, effectiveModel, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
+import { chatStream, effectiveModel, isQuotaError, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
 import { callMcpTool, listMcpTools } from "./mcp";
 import { search, tagCounts } from "./rag";
 import { normalizeAgentRag, normalizeResources } from "./resources";
@@ -381,7 +381,8 @@ export async function runAgent(p: RunParams): Promise<string> {
         res = await call();
       } catch (e) {
         // A model call that fails (timeout, CLI crash, network) is retried once: the turn keeps its progress.
-        if (signal?.aborted) throw e;
+        // Not when a quota or rate limit is reached: it would fail the same way.
+        if (signal?.aborted || isQuotaError(e instanceof Error ? e.message : String(e))) throw e;
         emit({ type: "text", callId, text: `\n\n_(${e instanceof Error ? e.message : String(e)} : nouvel essai)_\n\n` });
         await new Promise((r) => setTimeout(r, 3000));
         res = await call();
