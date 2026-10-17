@@ -48,4 +48,6 @@ export const app: Record<string, string> = {
   Projet: "Project",
   "Langue de l'interface et des réponses des agents": "Language of the interface and of the agents' answers",
   "100 % local · Ollama": "100% local · Ollama",
+  "Étapes max pour un ticket": "Max steps for a ticket",
+  "Allers-retours outil → modèle pour une tentative de ticket : écrire, exécuter et corriger demande plus d'étapes qu'une réponse.": "Tool → model round trips for one ticket attempt: writing, running and fixing takes more steps than an answer.",
 };
