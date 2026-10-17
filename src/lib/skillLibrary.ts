@@ -135,6 +135,28 @@ Rends chaque constat avec : risque, gravité (critique / élevée / moyenne / fa
 **Pièges** : « fix stuff », « wip » ; mélanger refactor et fonctionnalité ; copier les messages de commit bruts dans le changelog.`,
   },
   {
+    name: "Environnements i1 / r1 / p1",
+    category: "Développement",
+    description: "Développer en i1, valider en recette r1, livrer en prod p1 : promotion, configuration et données par environnement",
+    profiles: ["Tech lead", "Architecte logiciel", "Architecte cloud", "Développeur backend", "Développeur frontend", "Développeur full-stack", "Développeur mobile", "Ingénieur DevOps / SRE", "Ingénieur QA", "Administrateur de bases de données", "Reviewer de code", "Data engineer", "Data scientist", "Ingénieur IA / LLM"],
+    content: `Tout projet livré tourne sur trois environnements, du moins au plus protégé :
+- **i1 (intégration / dev)** : là où l'on développe et teste librement. Données fictives ou anonymisées.
+- **r1 (recette)** : copie fidèle de la prod (mêmes versions, même configuration hors secrets) où l'on valide une version figée : tests fonctionnels, de non-régression et validation métier.
+- **p1 (production)** : utilisée par les vrais utilisateurs. On n'y fait aucun test ni correction directe.
+
+**Promotion** : i1 → r1 → p1, toujours dans cet ordre et avec le même artefact (même build, même image, même tag). Une version n'entre en p1 qu'après validation de la recette (procès-verbal ou ticket validé). Un correctif urgent suit le même chemin, en accéléré.
+
+**Configuration** : un fichier ou un jeu de variables par environnement (\`.env.i1\`, \`.env.r1\`, \`.env.p1\` ou équivalent), jamais de valeur d'environnement en dur dans le code. Secrets séparés par environnement, jamais committés ; un secret de p1 n'est jamais utilisé en i1 ou r1.
+
+**Données** : pas de données de production en i1 ; en r1, uniquement anonymisées. Les migrations de base sont versionnées et jouées dans le même ordre sur les trois environnements.
+
+**Livrables attendus** quand tu prépares une mise en production : la version et ce qu'elle contient, le résultat de la recette en r1, les étapes de déploiement, les vérifications après mise en prod et le **plan de retour arrière**.
+
+**Pièges** : « ça marche en local » présenté comme validé ; corriger directement en p1 ; r1 différente de p1 (versions, configuration) ; oublier de rejouer une migration.
+
+**Avant de répondre** : précise sur quel environnement chaque action a lieu, et ne propose jamais d'action directe en p1 sans recette validée.`,
+  },
+  {
     name: "README de projet",
     category: "Développement",
     description: "Rédiger un README qui permet de lancer le projet en 5 minutes",
