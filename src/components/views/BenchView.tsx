@@ -28,7 +28,7 @@ type Run = {
   id: string;
   batch: string;
   scenario: string;
-  config: { label: string; leadModel: string; builderModel: string; rigor: Rigor };
+  config: { label: string; leadModel: string; builderModel: string; rigor: Rigor; baseline?: string };
   status: "queued" | "running" | "done" | "error" | "stopped";
   phase: string;
   started_at: number | null;
@@ -48,9 +48,13 @@ export function BenchView({ meta }: { meta: Meta }) {
   const data = useData<Data>("/api/bench");
   const [picked, setPicked] = useState<string[]>([]);
   const [config, setConfig] = useState({ label: "", leadModel: "", builderModel: "", rigor: "standard" as Rigor });
+  // "team" = Millikin's own logic; "engine" = reference, the scenario handed directly to the engine's CLI agent.
+  const [mode, setMode] = useState<"team" | "engine">("team");
+  const [baseline, setBaseline] = useState("");
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState<string | null>(null);
   const models = meta.models.filter((m) => m.kind !== "embedding");
+  const cliModels = models.filter((m) => /^(claude-code|codex)\//.test(m.ref));
   const busy = data.data?.busy;
   const reload = data.reload;
   useEffect(() => {
@@ -73,7 +77,7 @@ export function BenchView({ meta }: { meta: Meta }) {
   const start = async () => {
     setError(undefined);
     try {
-      await api("/api/bench", { method: "POST", json: { action: "start", scenarios: picked, config } });
+      await api("/api/bench", { method: "POST", json: { action: "start", scenarios: picked, config: mode === "engine" ? { ...config, baseline } : config } });
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -115,45 +119,72 @@ export function BenchView({ meta }: { meta: Meta }) {
         </Card>
         <Card className="flex flex-col gap-3 p-4 lg:col-span-2">
           <div className="text-sm font-semibold">{t("Configuration à tester")}</div>
+          <div className="flex rounded-lg border border-line p-0.5 text-sm">
+            {(
+              [
+                ["team", t("Équipe Millikin")],
+                ["engine", t("Moteur seul (référence)")],
+              ] as const
+            ).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setMode(id)} className={cx("flex-1 rounded-md px-3 py-1", mode === id ? "bg-accent/20 text-fg" : "text-fg-muted hover:text-fg")}>
+                {label}
+              </button>
+            ))}
+          </div>
           <Field label={t("Nom de la configuration")}>
             <Input value={config.label} placeholder={t("ex. Sonnet exécutants, Opus contrôle")} onChange={(e) => setConfig({ ...config, label: e.target.value })} />
           </Field>
-          <Field label={t("Modèle des premiers contacts (planification, contrôle)")}>
-            <Select value={config.leadModel} onChange={(e) => setConfig({ ...config, leadModel: e.target.value })}>
-              <option value="">{t("modèle de chaque agent")}</option>
-              {models.map((m) => (
-                <option key={m.ref} value={m.ref}>
-                  {m.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label={t("Modèle des exécutants")}>
-            <Select value={config.builderModel} onChange={(e) => setConfig({ ...config, builderModel: e.target.value })}>
-              <option value="">{t("modèle de chaque agent")}</option>
-              {models.map((m) => (
-                <option key={m.ref} value={m.ref}>
-                  {m.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label={t("Niveau de rigueur")}>
-            <Select value={config.rigor} onChange={(e) => setConfig({ ...config, rigor: e.target.value as Rigor })}>
-              {RIGORS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {t(r.label)}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {mode === "engine" ? (
+            <Field label={t("Moteur")} hint={t("Le scénario est confié directement à l'agent du moteur (sa CLI, ses outils), sans Millikin : c'est l'étalon pour mesurer le surcoût de la plateforme.")}>
+              <Select value={baseline} onChange={(e) => setBaseline(e.target.value)}>
+                <option value="">{t("Choisir un modèle Claude Code ou Codex")}</option>
+                {cliModels.map((m) => (
+                  <option key={m.ref} value={m.ref}>
+                    {m.label} ({m.ref.split("/")[0]})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <>
+            <Field label={t("Modèle des premiers contacts (planification, contrôle)")}>
+              <Select value={config.leadModel} onChange={(e) => setConfig({ ...config, leadModel: e.target.value })}>
+                <option value="">{t("modèle de chaque agent")}</option>
+                {models.map((m) => (
+                  <option key={m.ref} value={m.ref}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label={t("Modèle des exécutants")}>
+              <Select value={config.builderModel} onChange={(e) => setConfig({ ...config, builderModel: e.target.value })}>
+                <option value="">{t("modèle de chaque agent")}</option>
+                {models.map((m) => (
+                  <option key={m.ref} value={m.ref}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label={t("Niveau de rigueur")}>
+              <Select value={config.rigor} onChange={(e) => setConfig({ ...config, rigor: e.target.value as Rigor })}>
+                {RIGORS.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {t(r.label)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            </>
+          )}
           <ErrorNote>{error}</ErrorNote>
           {busy ? (
             <Button variant="soft" onClick={async () => (await api("/api/bench", { method: "POST", json: { action: "stop" } }), reload())}>
               <Square size={14} /> {t("Arrêter le banc d'essai")}
             </Button>
           ) : (
-            <Button variant="primary" disabled={!picked.length} onClick={start}>
+            <Button variant="primary" disabled={!picked.length || (mode === "engine" && !baseline)} onClick={start}>
               <Play size={14} /> {t("Lancer {n} scénario(s)", { n: picked.length })}
             </Button>
           )}
@@ -194,7 +225,9 @@ export function BenchView({ meta }: { meta: Meta }) {
                             <div>
                               <div className="font-medium text-fg">{c.label}</div>
                               <div className="text-[11px] text-fg-subtle">
-                                {modelLabel(c.leadModel)} / {modelLabel(c.builderModel)} · {t(RIGORS.find((x) => x.id === c.rigor)?.label ?? c.rigor)}
+                                {c.baseline
+                                  ? t("moteur seul : {m}", { m: modelLabel(c.baseline) })
+                                  : `${modelLabel(c.leadModel)} / ${modelLabel(c.builderModel)} · ${t(RIGORS.find((x) => x.id === c.rigor)?.label ?? c.rigor)}`}
                               </div>
                               <div className="text-[11px] text-fg-subtle">{r.started_at ? new Date(r.started_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : ""}</div>
                             </div>

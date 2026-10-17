@@ -14,7 +14,7 @@ import { reviewMode, rigorOf } from "./rigor";
 import { syntaxError, workspaceFor } from "./tools";
 
 const BOARD_WRITE = ["board_add_card", "board_update_card"];
-const DEP_RESULT_CHARS = 2500;
+const DEP_RESULT_CHARS = 1200;
 
 const note = (t: Task, by: string, text: string) => [...(t.notes ?? []), { at: now(), by, text }];
 
@@ -136,6 +136,14 @@ async function factsFor(actions: Actions, workspace: string, task: Task, report:
 
 // A test or lint tool launched as a command (start of a segment, optionally via a venv path, python -m or npx).
 const TEST_COMMAND = /(?:^|&&|;|\|\|)\s*(?:[\w./-]*\/)?(?:(?:python3?|py)\s+-m\s+|npx\s+|uv\s+run\s+)?(pytest|unittest|ruff|mypy|tsc|eslint|vitest|jest|flake8|(?:npm|pnpm|yarn)(?:\s+run)?\s+test|go\s+test|cargo\s+test)\b/;
+/**
+ * Test or lint tool whose result the exit code reflects: the last step of the command (after ; && ||), any
+ * pipe ignored. In « pytest; ls x » the code is the one of ls, so it is not a test run for the control.
+ */
+const testToolOf = (command: string) => {
+  const last = command.split(/;|&&|\|\|/).map((x) => x.trim()).filter(Boolean).pop() ?? "";
+  return last.split("|")[0].match(TEST_COMMAND)?.[1];
+};
 const CODE_FILE = /\.(py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|rb|php|sh)$/;
 const NOT_DONE = /(n'est pas termin[ée]e|non termin[ée]e|pas encore termin[ée]e?|je ne demande pas (?:encore )?la relecture)/i;
 
@@ -155,7 +163,7 @@ async function autoCheck(written: Set<string>, commands: Actions["commands"], wo
   }
   const lastByTool = new Map<string, { command: string; code: number }>();
   for (const c of commands) {
-    const tool = c.command.match(TEST_COMMAND)?.[1];
+    const tool = testToolOf(c.command);
     const code = Number(c.result.match(/code de sortie : (\d+)/)?.[1] ?? 0);
     if (tool) lastByTool.set(tool, { command: c.command, code });
   }
@@ -171,6 +179,15 @@ export function blockersOf(task: Task, all: Task[]): Task[] {
 }
 
 /** What the assignee needs to know from the tasks it depends on. */
+/** Short record of a finished task, given to the tasks that depend on it instead of its whole report. */
+function digestOf(written: Set<string>, commands: Actions["commands"], report: string) {
+  const tests = [...new Map(commands.filter((c) => testToolOf(c.command)).map((c) => [testToolOf(c.command), c])).values()]
+    .map((c) => `${c.command.slice(0, 100)} → code ${c.result.match(/code de sortie : (\d+)/)?.[1] ?? "?"}`)
+    .slice(0, 3);
+  const remarks = report.match(/Remarques\s*:([\s\S]{0,500})/i)?.[1]?.trim() ?? report.replace(/\s+/g, " ").slice(0, 400);
+  return [written.size ? `Fichiers : ${[...written].slice(0, 15).join(", ")}` : "", tests.length ? `Tests : ${tests.join(" ; ")}` : "", remarks ? `Remarques : ${remarks}` : ""].filter(Boolean).join("\n");
+}
+
 function dependencyContext(task: Task, all: Task[]): string {
   const deps = (task.depends_on ?? []).map((id) => all.find((t) => t.id === id)).filter((t): t is Task => !!t);
   if (!deps.length) return "";
@@ -178,12 +195,13 @@ function dependencyContext(task: Task, all: Task[]): string {
     "\n\n## Tâches dont celle-ci dépend (déjà réalisées : appuie-toi dessus, ne refais pas leur travail)\n" +
     deps
       .map((d) => {
+        if (d.digest) return `### #${d.id} — ${d.title}\n${d.digest}`;
         const result = d.result ? (d.result.length > DEP_RESULT_CHARS ? d.result.slice(0, DEP_RESULT_CHARS) + "…" : d.result) : "(pas de compte rendu)";
         const review = d.evaluation ? `\nContrôle (${d.evaluation.verdict}, ${d.evaluation.score}/5) : ${d.evaluation.comment}` : "";
         return `### #${d.id} — ${d.title}\nConsigne : ${d.description || d.title}\nCompte rendu :\n${result}${review}`;
       })
       .join("\n\n") +
-    "\nRelis les fichiers qu'elles ont produits (list_files / read_file) avant de commencer."
+    "\nLis seulement les fichiers dont tu as besoin parmi ceux qu'elles ont produits."
   );
 }
 
@@ -247,7 +265,11 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
 
 Réalise cette tâche maintenant. Si elle implique du code ou des documents, écris réellement les fichiers dans le dossier du projet.
 Priorité : d'abord chaque livrable et critère d'acceptation demandé (fichiers écrits, tests lancés), ensuite seulement les améliorations au-delà de la consigne.
-Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifiés (chemins), et les points d'attention.`;
+Termine par un compte rendu COURT (10 lignes au plus), sous cette forme :
+Fichiers : chemins créés ou modifiés
+Commandes : commandes lancées et leur résultat (code de sortie, tests passés)
+Statut : terminé, ou ce qui reste à faire
+Remarques : 3 points au plus`;
 
         try {
           lastError = "";
@@ -290,6 +312,7 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
               id: t.id,
               evaluation,
               status: evaluation.verdict === "valide" ? "done" : "retry",
+              ...(evaluation.verdict === "valide" ? { digest: digestOf(launchWritten, launchCommands, result) } : {}),
               notes: note(t, "Millikin", `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
             });
           }
@@ -339,6 +362,7 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
               id: t.id,
               evaluation,
               status: evaluation.verdict === "valide" ? "done" : "retry",
+              ...(evaluation.verdict === "valide" ? { digest: digestOf(launchWritten, launchCommands, result) } : {}),
               notes: note(t, reviewer.name, `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
             });
             await appendDecision(

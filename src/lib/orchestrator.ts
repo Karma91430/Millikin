@@ -108,6 +108,61 @@ export type RunParams = {
   ctx: Omit<ToolContext, "agent">;
 };
 
+const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const STOP = new Set(["avec", "pour", "dans", "les", "des", "une", "sans", "plus", "chaque", "leur", "entre", "selon", "ses", "son", "qui", "que"]);
+const words = (s: string) => new Set(norm(s).match(/[a-z0-9]{4,}/g)?.filter((w) => !STOP.has(w)) ?? []);
+
+/** Skills worth injecting in full for this request: named in it, or sharing words with it (2 at most). Exported for tests. */
+export function relevantSkills(skills: Skill[], input: string): Skill[] {
+  const text = norm(input);
+  const asked = words(input);
+  return skills
+    .map((s) => {
+      const named = text.includes(norm(s.name));
+      // A word of the skill's name counts double: « changelog » is enough for « Commits et changelog ».
+      const nameWords = words(s.name);
+      const shared = [...words(`${s.name} ${s.description}`)].filter((w) => asked.has(w)).reduce((n, w) => n + (nameWords.has(w) ? 2 : 1), 0);
+      return { s, score: named ? 100 : shared };
+    })
+    .filter((x) => x.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)
+    .map((x) => x.s);
+}
+
+const COMPACT_OVER = 700;
+const WRITE_FIELDS = ["content", "new_text", "old_text"];
+
+/**
+ * Bound the context of a long turn: results and written contents from steps older than the last two are
+ * replaced by a one-line note (the agent has used them; it can run the tool again for the detail). Messages
+ * are compacted once and then stay identical, so the conversation prefix remains cacheable. Exported for tests.
+ */
+export function compactOld(messages: ChatMessage[], from: number, to: number) {
+  const names = new Map<string, string>();
+  for (let i = from; i < to; i++) {
+    const m = messages[i];
+    if (m.role === "assistant" && m.tool_calls?.length) {
+      m.tool_calls = m.tool_calls.map((tc) => {
+        names.set(tc.id, tc.function.name);
+        if (tc.function.arguments.length <= COMPACT_OVER) return tc;
+        try {
+          const args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+          for (const k of WRITE_FIELDS)
+            if (typeof args[k] === "string" && (args[k] as string).length > 300) args[k] = `[${(args[k] as string).split("\n").length} lignes, déjà écrites]`;
+          return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
+        } catch {
+          return tc;
+        }
+      });
+    }
+    if (m.role === "tool" && typeof m.content === "string" && m.content.length > COMPACT_OVER && !m.content.startsWith("[Résultat compacté")) {
+      const head = m.content.slice(0, 240).replace(/\s+/g, " ");
+      m.content = `[Résultat compacté de ${names.get(m.tool_call_id ?? "") ?? "l'outil"} : ${m.content.length} caractères, déjà pris en compte. Début : « ${head}… » Relance l'outil si tu as besoin du détail.]`;
+    }
+  }
+}
+
 /** Emit a delegation the way ask_agent would, so the UI shows it identically. */
 async function delegate(p: RunParams, callId: string, target: Agent, message: string, extra: Partial<RunParams> = {}) {
   const toolCallId = `call_${newId()}`;
@@ -142,9 +197,26 @@ export async function runAgent(p: RunParams): Promise<string> {
     const impls: Record<string, ToolImpl> = {};
     const sys: string[] = [agent.system_prompt || `Tu es ${agent.name}. ${agent.role}`];
 
-    // Skills are injected directly: small local models follow inline instructions far better than a lookup tool.
+    // Skills: the ones that match the request are injected in full (small models follow inline instructions
+    // far better than a lookup), the others only as an index with use_skill, so each call stays light.
     const skills = (agent.skill_ids ?? []).map((id) => get<Skill>("skills", id)).filter(Boolean) as Skill[];
-    if (skills.length) sys.push("## Compétences\n" + skills.map((s) => `### ${s.name}\n${s.description}\n\n${s.content}`).join("\n\n"));
+    if (skills.length) {
+      const inline = relevantSkills(skills, p.input);
+      const others = skills.filter((s) => !inline.includes(s));
+      if (inline.length) sys.push("## Compétences utiles pour cette demande\n" + inline.map((s) => `### ${s.name}\n${s.description}\n\n${s.content}`).join("\n\n"));
+      if (others.length) {
+        sys.push("## Autres compétences disponibles\n" + others.map((s) => `- ${s.name} : ${s.description}`).join("\n") + "\nSi l'une d'elles sert ta tâche, lis sa méthode avec l'outil use_skill.");
+        tools.push({
+          type: "function",
+          function: { name: "use_skill", description: "Lire la méthode complète d'une de tes compétences.", parameters: { type: "object", properties: { name: { type: "string", description: "nom de la compétence" } }, required: ["name"] } },
+        });
+        impls.use_skill = async (a) => {
+          const want = norm(String(a.name ?? ""));
+          const s = others.find((x) => norm(x.name) === want) ?? others.find((x) => norm(x.name).includes(want) || want.includes(norm(x.name)));
+          return s ? `### ${s.name}\n${s.content}` : `Compétence inconnue. Disponibles : ${others.map((x) => x.name).join(", ")}`;
+        };
+      }
+    }
 
     // ---- team position
     const entries = team?.spec.entry_ids ?? [];
@@ -354,9 +426,14 @@ export async function runAgent(p: RunParams): Promise<string> {
 
     let nudged = false;
     let nudgedEmpty = false;
+    // Where each step's messages begin, to compact the steps older than the last two.
+    const stepStarts: number[] = [];
+    const firstOwn = messages.length;
     let carried = ""; // text already streamed before a nudge, kept in the final answer
     for (let step = 0; step < maxSteps; step++) {
       const last = step === maxSteps - 1;
+      stepStarts.push(messages.length);
+      if (step >= 3) compactOld(messages, firstOwn, stepStarts[step - 2]);
       // Last step: tools are withdrawn, so say it, or the agent describes what it "would do" next.
       if (last && step > 0 && tools.length) {
         p.onStepLimit?.();

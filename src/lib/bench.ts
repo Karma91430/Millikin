@@ -1,13 +1,13 @@
 // Test bench: runs reference scenarios end to end (planning, tickets, controls) with a chosen configuration,
 // then checks the result with hidden checks and records the figures. Bench projects live in the database
 // like any project but are hidden from the lists; their folders are under data/bench/.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BENCH_SCENARIOS, type BenchCheck, type BenchScenario } from "./benchScenarios";
 import { db, dataDir, list, newId, now, remove, upsert, type Agent, type Project, type Task } from "./db";
-import { withModelOverride } from "./gateway";
+import { resolveModel, withModelOverride } from "./gateway";
 import { startPlanRun } from "./planner";
 import { type Rigor } from "./rigor";
 import { stopRun, type Run } from "./runs";
@@ -20,6 +20,8 @@ export type BenchConfig = {
   leadModel: string;
   builderModel: string;
   rigor: Rigor;
+  /** Reference run: the scenario is given directly to this engine's own CLI agent (Claude Code or Codex), without Millikin. */
+  baseline?: string;
 };
 
 export type BenchResult = {
@@ -53,7 +55,7 @@ export type BenchRun = {
   project_id: string;
 };
 
-const g = globalThis as unknown as { __millikinBench?: { batch: string; stop: boolean; current?: Run } };
+const g = globalThis as unknown as { __millikinBench?: { batch: string; stop: boolean; current?: Run; kill?: () => void } };
 
 const parse = (r: Record<string, unknown>): BenchRun => ({
   ...(r as unknown as BenchRun),
@@ -107,6 +109,7 @@ export function stopBench() {
   if (!b) return;
   b.stop = true;
   if (b.current) stopRun(b.current.id);
+  b.kill?.();
 }
 
 /** Delete the bench runs of a batch, their hidden projects and folders. */
@@ -125,6 +128,7 @@ export async function deleteBenchBatch(batch: string) {
 const findAgent = (agents: Agent[], name: string) => agents.find((a) => a.name === name) ?? agents.find((a) => a.name.toLowerCase().includes(name.toLowerCase().split(" ")[0]));
 
 async function runScenario(id: string, s: BenchScenario, config: BenchConfig) {
+  if (config.baseline) return runBaseline(id, s, config.baseline);
   const agents = list<Agent>("agents");
   const leads = s.leads.map((n) => findAgent(agents, n));
   const builders = s.builders.map((n) => findAgent(agents, n));
@@ -199,6 +203,68 @@ async function runScenario(id: string, s: BenchScenario, config: BenchConfig) {
     modelErrors: usage.err,
   };
   save(id, { status: g.__millikinBench?.stop ? "stopped" : "done", phase: "", ended_at: now(), result });
+}
+
+/**
+ * Reference: the same brief handed to the engine's own agent in one request (its tools, its loop), then the
+ * same hidden checks. Only a yardstick for Millikin's overhead; Millikin itself never relies on it.
+ */
+async function runBaseline(id: string, s: BenchScenario, ref: string) {
+  const res = resolveModel(ref);
+  const type = res.provider.type;
+  if (type !== "claude-code" && type !== "codex") throw new Error("La référence « moteur seul » existe pour Claude Code et Codex");
+  const dir = path.join(dataDir(), "bench", id);
+  await fs.mkdir(dir, { recursive: true });
+  for (const [f, content] of Object.entries(s.files ?? {})) await fs.writeFile(path.join(dir, f), content, "utf8");
+  save(id, { status: "running", phase: "build", started_at: now() });
+  const prompt = `${s.brief}\n\nRéalise ce projet dans le dossier courant, exécute les tests, puis donne un compte rendu court.`;
+  const cmd = res.provider.base_url || (type === "codex" ? "codex" : "claude");
+  const args =
+    type === "claude-code"
+      ? ["-p", "--output-format", "json", "--model", res.model, "--permission-mode", "acceptEdits", "--no-session-persistence", "--allowedTools", "Read,Write,Edit,Glob,Grep,Bash(python3:*),Bash(python:*),Bash(pytest:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cd:*)"]
+      : ["exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write", "--model", res.model, "-"];
+  const t0 = now();
+  const out = await new Promise<string>((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: dir, env: process.env });
+    let text = "";
+    const timer = setTimeout(() => child.kill("SIGTERM"), 30 * 60_000);
+    g.__millikinBench!.kill = () => child.kill("SIGTERM");
+    child.stdout.on("data", (d: Buffer) => (text += d.toString("utf8")));
+    child.on("error", (e) => reject(e));
+    child.on("close", () => (clearTimeout(timer), resolve(text)));
+    child.stdin.end(prompt);
+  });
+  let calls = 0;
+  let pin = 0;
+  let pout = 0;
+  if (type === "claude-code") {
+    const j = JSON.parse(out.slice(out.indexOf("{"))) as { num_turns?: number; usage?: Record<string, number>; is_error?: boolean; result?: string };
+    if (j.is_error) throw new Error(`Claude Code : ${String(j.result).slice(0, 300)}`);
+    const u = j.usage ?? {};
+    calls = j.num_turns ?? 0;
+    pin = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+    pout = u.output_tokens ?? 0;
+  } else {
+    for (const line of out.split("\n")) {
+      try {
+        const e = JSON.parse(line) as { type?: string; usage?: { input_tokens?: number; output_tokens?: number } };
+        if (e.type === "turn.completed" && e.usage) {
+          calls++;
+          pin += e.usage.input_tokens ?? 0;
+          pout += e.usage.output_tokens ?? 0;
+        }
+      } catch {}
+    }
+  }
+  save(id, { phase: "checks" });
+  const checks = [];
+  for (const c of s.checks) checks.push(await runCheck(c, dir));
+  save(id, {
+    status: "done",
+    phase: "",
+    ended_at: now(),
+    result: { checks, passed: checks.filter((c) => c.ok).length, total: checks.length, tasks: 0, done: 0, firstTry: 0, attempts: 0, needsHuman: 0, planMs: 0, buildMs: now() - t0, modelCalls: calls, promptTokens: pin, completionTokens: pout, modelErrors: 0 },
+  });
 }
 
 /** Run one hidden check; a scratch check gets an empty folder and $PROJECT. */

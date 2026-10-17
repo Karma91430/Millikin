@@ -21,7 +21,14 @@ async function handlePOST(req: Request) {
   }
   try {
     const c = b.config ?? {};
-    const config: BenchConfig = { label: String(c.label ?? "").trim() || "Configuration actuelle", leadModel: c.leadModel ?? "", builderModel: c.builderModel ?? "", rigor: rigorOf(c) };
+    const baseline = c.baseline ? String(c.baseline) : undefined;
+    const config: BenchConfig = {
+      label: String(c.label ?? "").trim() || (baseline ? `Moteur seul · ${baseline}` : "Configuration actuelle"),
+      leadModel: c.leadModel ?? "",
+      builderModel: c.builderModel ?? "",
+      rigor: rigorOf(c),
+      ...(baseline ? { baseline } : {}),
+    };
     return Response.json({ batch: startBench(b.scenarios ?? [], config) });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
