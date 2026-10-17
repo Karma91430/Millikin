@@ -261,4 +261,12 @@ export const projects: Record<string, string> = {
   "Afficher dans le Finder": "Show in Finder",
   "Impossible de lire : {error}": "Cannot read: {error}",
   "Sélectionne un fichier pour voir son contenu et son chemin complet.": "Select a file to see its content and full path.",
+  "Niveau de rigueur": "Level of rigour",
+  "Règle le nombre et le type de tâches à la planification, et le contrôle de chaque tâche.": "Sets the number and kind of tasks when planning, and how each task is checked.",
+  Prototype: "Prototype",
+  Standard: "Standard",
+  Entreprise: "Enterprise",
+  "Le minimum qui marche : peu de tâches, orientées livrables, contrôle automatique sur les faits.": "The minimum that works: few deliverable-oriented tasks, automatic fact-based checks.",
+  "Un vrai projet sans cérémonie : tâches de taille moyenne, relecture par un agent sur les tâches importantes.": "A real project without ceremony: medium-sized tasks, agent review on the important ones.",
+  "Méthode complète : décisions d'architecture, user stories, recette, relecture de chaque tâche par un agent.": "Full method: architecture decisions, user stories, acceptance testing, agent review of every task.",
 };

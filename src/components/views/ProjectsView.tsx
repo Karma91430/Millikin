@@ -4,6 +4,7 @@ import { Blocks, CalendarRange, Check, ChevronDown, ChevronRight, ChevronUp, Cod
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
 import { hasModule, PROJECT_MODULES } from "@/lib/modules";
+import { RIGORS, rigorOf, type Rigor } from "@/lib/rigor";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
@@ -258,6 +259,7 @@ function NewProject({
   const [members, setMembers] = useState<string[]>([]);
   const [entries, setEntries] = useState<string[]>([]);
   const [modules, setModules] = useState<string[]>(["board", "sprints", "files", "decisions", "stats"]);
+  const [rigor, setRigor] = useState<Rigor>("standard");
   const [dir, setDir] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<"" | "team" | "modules" | "create">("");
@@ -313,7 +315,7 @@ function NewProject({
               setBusy("create");
               try {
                 const json =
-                  mode === "template" ? { name, description, template_id: template, path: dir, modules } : { name, description, members, entries, path: dir, modules };
+                  mode === "template" ? { name, description, template_id: template, path: dir, modules, rigor } : { name, description, members, entries, path: dir, modules, rigor };
                 onCreated(await api<Project>("/api/projects", { method: "POST", json }), scoping);
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
@@ -418,6 +420,12 @@ function NewProject({
               )}
             </>
           )}
+        </div>
+
+        {/* rigor */}
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-semibold">{t("Niveau de rigueur")}</span>
+          <RigorPicker value={rigor} onChange={setRigor} />
         </div>
 
         {/* modules */}
@@ -761,9 +769,29 @@ function ProjectTeam({ project, agents, onSaved, onAgentsChange }: { project: Pr
 }
 
 /** Project sheet: identity of the project (name, description, folder, modules, team, dates), editable in place. */
+/** Prototype / Standard / Entreprise: how much method the planning and the controls apply. */
+function RigorPicker({ value, onChange }: { value: Rigor; onChange: (r: Rigor) => void }) {
+  const { t } = useT();
+  return (
+    <div className="grid gap-1.5 sm:grid-cols-3">
+      {RIGORS.map((r) => (
+        <button
+          key={r.id}
+          type="button"
+          onClick={() => onChange(r.id)}
+          className={cx("rounded-lg border p-2.5 text-left text-sm", value === r.id ? "border-accent/60 bg-accent/10" : "border-line hover:border-line-strong")}
+        >
+          <span className="block font-medium">{t(r.label)}</span>
+          <span className="block text-[11px] text-fg-muted">{t(r.description)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project; byId: Map<string, Agent>; onSaved: () => void; onModules: () => void }) {
   const { t, lang } = useT();
-  const [edit, setEdit] = useState<{ name: string; description: string } | null>(null);
+  const [edit, setEdit] = useState<{ name: string; description: string; rigor: Rigor } | null>(null);
   const [error, setError] = useState<string>();
   const spec = specFromTeam(project.team);
   const leads = spec.entry_ids.map((id) => byId.get(id)).filter((a): a is Agent => !!a);
@@ -781,7 +809,7 @@ function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project;
       <div className="mb-1 flex items-center justify-between">
         <div className="text-sm font-semibold">{t("Fiche du projet")}</div>
         {!edit && (
-          <Button size="sm" variant="ghost" onClick={() => setEdit({ name: project.name, description: project.description })}>
+          <Button size="sm" variant="ghost" onClick={() => setEdit({ name: project.name, description: project.description, rigor: rigorOf(project) })}>
             <Pencil size={13} /> {t("Modifier")}
           </Button>
         )}
@@ -793,7 +821,7 @@ function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project;
             e.preventDefault();
             if (!edit.name.trim()) return setError(t("Le nom du projet est obligatoire"));
             try {
-              await crud.save("projects", { id: project.id, name: edit.name.trim(), description: edit.description });
+              await crud.save("projects", { id: project.id, name: edit.name.trim(), description: edit.description, rigor: edit.rigor });
               setEdit(null);
               setError(undefined);
               onSaved();
@@ -809,6 +837,9 @@ function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project;
           <Field label={t("Description")} hint={t("Objectif, utilisateurs, contraintes : les agents la lisent avant de travailler sur le projet.")}>
             <Textarea rows={5} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
           </Field>
+          <Field label={t("Niveau de rigueur")} hint={t("Règle le nombre et le type de tâches à la planification, et le contrôle de chaque tâche.")}>
+            <RigorPicker value={edit.rigor} onChange={(rigor) => setEdit({ ...edit, rigor })} />
+          </Field>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => (setEdit(null), setError(undefined))}>
               {t("Annuler")}
@@ -823,6 +854,13 @@ function ProjectSheet({ project, byId, onSaved, onModules }: { project: Project;
           {row(t("Nom"), <span className="font-medium">{project.name}</span>)}
           {row(t("Description"), project.description ? <span className="whitespace-pre-wrap text-fg-muted">{project.description}</span> : <span className="text-fg-subtle">{t("Aucune description : ajoute-la pour aider l'équipe.")}</span>)}
           {row(t("Dossier"), <code className="break-all font-mono text-xs">{project.path}</code>)}
+          {row(
+            t("Niveau de rigueur"),
+            <span>
+              <span className="font-medium">{t(RIGORS.find((r) => r.id === rigorOf(project))!.label)}</span>
+              <span className="text-fg-muted"> · {t(RIGORS.find((r) => r.id === rigorOf(project))!.description)}</span>
+            </span>,
+          )}
           {row(
             t("Premiers contacts"),
             leads.length ? (

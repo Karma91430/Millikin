@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getSettings, list, newId, now, upsert, type Agent, type Task } from "./db";
 import { resolveModel, type ToolDef } from "./gateway";
+import { isIgnoredEntry } from "./projectmap";
 import { fetchUrl, httpRequest, webSearch } from "./webtools";
 
 /** Size of one read_file chunk: fits in the tool results the orchestrator keeps for this agent's engine (6000 / 20000). */
@@ -20,18 +21,25 @@ const checkWith = (cmd: string, args: string[]) =>
  * Checks after a write, returned with the tool result so the agent fixes problems in the same attempt:
  * syntax of Python / JSON / JavaScript files, and a file that suddenly lost most of its lines (truncation).
  */
-async function afterWrite(file: string, content: string, before: string | null): Promise<string> {
-  const notes: string[] = [];
+/** Syntax error of a Python / JSON / JavaScript file ("" when fine or not checkable). */
+export async function syntaxError(file: string, content: string): Promise<string> {
   const ext = path.extname(file).toLowerCase();
-  let error = "";
   if (ext === ".json") {
     try {
       JSON.parse(content);
+      return "";
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      return e instanceof Error ? e.message : String(e);
     }
-  } else if (ext === ".py") error = await checkWith("python3", ["-c", "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1])", file]);
-  else if ([".js", ".mjs", ".cjs"].includes(ext)) error = await checkWith("node", ["--check", file]);
+  }
+  if (ext === ".py") return checkWith("python3", ["-c", "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1])", file]);
+  if ([".js", ".mjs", ".cjs"].includes(ext)) return checkWith("node", ["--check", file]);
+  return "";
+}
+
+async function afterWrite(file: string, content: string, before: string | null): Promise<string> {
+  const notes: string[] = [];
+  const error = await syntaxError(file, content);
   if (error) notes.push(`⚠️ Erreur de syntaxe dans ce fichier : ${error}\nCorrige-le maintenant (relis-le avec read_file) avant de continuer.`);
   if (before !== null) {
     const was = before.split("\n").length;
@@ -52,7 +60,6 @@ const fn = (name: string, description: string, properties: Record<string, unknow
 const str = (description: string) => ({ type: "string", description });
 
 // ---------- workspace ----------
-const IGNORED = new Set(["node_modules", ".git", ".next", "dist", "build", ".venv", "venv", "__pycache__", ".DS_Store"]);
 
 /** Resolve a path inside the workspace; rejects anything (including symlinks) that escapes it. */
 async function inside(root: string, rel: string): Promise<string> {
@@ -78,7 +85,7 @@ async function tree(root: string, dir: string, depth: number, out: string[], lim
   const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
   entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
   for (const e of entries) {
-    if (IGNORED.has(e.name) || out.length >= limit) continue;
+    if (isIgnoredEntry(e.name) || out.length >= limit) continue;
     const rel = path.relative(root, path.join(dir, e.name));
     out.push(e.isDirectory() ? `${rel}/` : rel);
     if (e.isDirectory() && depth > 1) await tree(root, path.join(dir, e.name), depth - 1, out, limit);

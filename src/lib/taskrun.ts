@@ -8,7 +8,9 @@ import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
-import { workspaceFor } from "./tools";
+import { isIgnoredEntry, projectMap } from "./projectmap";
+import { reviewMode, rigorOf } from "./rigor";
+import { syntaxError, workspaceFor } from "./tools";
 
 const BOARD_WRITE = ["board_add_card", "board_update_card"];
 const DEP_RESULT_CHARS = 2500;
@@ -76,7 +78,7 @@ const LIBRARY_NAMES = /^(node|next|vue|nuxt|chart|d3|three|express|react|deno|bu
 
 async function projectFiles(dir: string, base = dir, out = new Set<string>()) {
   for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", "dist"].includes(e.name)) continue;
+    if (isIgnoredEntry(e.name)) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) await projectFiles(full, base, out);
     else out.add(path.relative(base, full));
@@ -127,6 +129,37 @@ async function factsFor(actions: Actions, workspace: string, task: Task, report:
       `\nFichiers nommés dans le compte rendu mais absents du dossier : ${missing.slice(0, 10).join(", ")}. C'est normal s'ils ont été supprimés à dessein ou ne sont que des exemples ; c'est une faute seulement s'ils devaient être livrés.`,
     );
   return lines.join("\n");
+}
+
+// A test or lint tool launched as a command (start of a segment, optionally via a venv path, python -m or npx).
+const TEST_COMMAND = /(?:^|&&|;|\|\|)\s*(?:[\w./-]*\/)?(?:(?:python3?|py)\s+-m\s+|npx\s+|uv\s+run\s+)?(pytest|unittest|ruff|mypy|tsc|eslint|vitest|jest|flake8|(?:npm|pnpm|yarn)(?:\s+run)?\s+test|go\s+test|cargo\s+test)\b/;
+const CODE_FILE = /\.(py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|rb|php|sh)$/;
+const NOT_DONE = /(n'est pas termin[ée]e|non termin[ée]e|pas encore termin[ée]e?|je ne demande pas (?:encore )?la relecture)/i;
+
+/**
+ * Factual control without a model, for small tasks or prototypes: something was produced, files parse,
+ * the last run of each test or lint command passed, code was executed at least once, and the report does
+ * not say the work is unfinished. Returns the blocking problems (none = validated).
+ */
+async function autoCheck(written: Set<string>, commands: Actions["commands"], workspace: string, report: string) {
+  const issues: string[] = [];
+  if (!written.size && !commands.length) issues.push("aucun fichier écrit et aucune commande exécutée");
+  for (const f of written) {
+    const content = await fs.readFile(path.join(workspace, f), "utf8").catch(() => null);
+    if (content === null) continue;
+    const err = await syntaxError(path.join(workspace, f), content);
+    if (err) issues.push(`erreur de syntaxe dans ${f} : ${err.split("\n").pop()}`);
+  }
+  const lastByTool = new Map<string, { command: string; code: number }>();
+  for (const c of commands) {
+    const tool = c.command.match(TEST_COMMAND)?.[1];
+    const code = Number(c.result.match(/code de sortie : (\d+)/)?.[1] ?? 0);
+    if (tool) lastByTool.set(tool, { command: c.command, code });
+  }
+  for (const [, c] of lastByTool) if (c.code !== 0) issues.push(`la dernière exécution de « ${c.command.slice(0, 120)} » a échoué (code ${c.code})`);
+  if ([...written].some((f) => CODE_FILE.test(f)) && !commands.length) issues.push("du code a été écrit mais rien n'a été exécuté (ni test, ni lancement)");
+  if (NOT_DONE.test(report)) issues.push("le compte rendu indique que la tâche n'est pas terminée");
+  return issues;
 }
 
 /** Dependencies that are not done yet. */
@@ -188,6 +221,10 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
       // Report of an attempt stopped by the step limit: the next one continues from there, without a review.
       let carryOver = "";
       let continuations = 0;
+      // Everything produced during this launch, for the automatic control (continuations split the work).
+      const launchWritten = new Set<string>();
+      const launchCommands: Actions["commands"] = [];
+      const mode = reviewMode(rigorOf(project), t.complexity || 0);
 
       // Loop: work → review; a rejected or failed attempt is relaunched with the feedback, up to maxRetries times.
       for (let attempt = 0; ; attempt++) {
@@ -201,7 +238,9 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
             : lastError
               ? `\n\n## La tentative précédente a échoué\n${lastError}\nCorrige la cause avant de recommencer.`
               : "";
-        const input = `Tâche du projet « ${project.name} » (#${t.id}) : ${t.title}\n\n${t.description || "(pas de description)"}${dependencyContext(t, projectTasks(project.id))}${previous}
+        const map = await projectMap(ctx.workspace);
+        const mapSection = map ? `\n\n## Carte du projet (tenue à jour par Millikin)\n${map}\nAppuie-toi sur cette carte : ne liste pas tout le projet, lis seulement les fichiers utiles à ta tâche, et réutilise ce qui existe au lieu de le recréer.` : "";
+        const input = `Tâche du projet « ${project.name} » (#${t.id}) : ${t.title}\n\n${t.description || "(pas de description)"}${dependencyContext(t, projectTasks(project.id))}${mapSection}${previous}
 
 Réalise cette tâche maintenant. Si elle implique du code ou des documents, écris réellement les fichiers dans le dossier du projet.
 Priorité : d'abord chaque livrable et critère d'acceptation demandé (fichiers écrits, tests lancés), ensuite seulement les améliorations au-delà de la consigne.
@@ -227,6 +266,8 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
             maxSteps: taskSteps(),
             onStepLimit: () => (stepLimit = true),
           });
+          for (const f of actions.written) launchWritten.add(f);
+          launchCommands.push(...actions.commands);
           // Out of steps: a review would only say "unfinished". Continue directly (twice at most per launch).
           if (stepLimit && continuations < 2 && !signal.aborted) {
             continuations++;
@@ -236,10 +277,24 @@ Termine par un compte rendu : ce que tu as fait, les fichiers créés ou modifi�
           }
           t = upsert<Task>("tasks", { id: t.id, result, status: "review", notes: note(t, assignee.name, `Résultat : ${result.slice(0, 700)}`) });
 
-          const facts = await factsFor(actions, ctx.workspace, t, result);
+          // Small tasks and prototypes: Millikin checks the facts itself, no model call.
+          if (mode === "auto") {
+            const issues = await autoCheck(launchWritten, launchCommands, ctx.workspace, result);
+            const evaluation: Evaluation = issues.length
+              ? { verdict: "a_corriger", score: 2, comment: `Contrôle automatique : ${issues.join(" ; ")}.`, by: "Millikin", at: now() }
+              : { verdict: "valide", score: 4, comment: `Contrôle automatique : ${launchWritten.size} fichier(s) produit(s), ${launchCommands.length} commande(s) exécutée(s), aucune erreur relevée.`, by: "Millikin", at: now() };
+            t = upsert<Task>("tasks", {
+              id: t.id,
+              evaluation,
+              status: evaluation.verdict === "valide" ? "done" : "retry",
+              notes: note(t, "Millikin", `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
+            });
+          }
+
+          const facts = mode === "auto" ? "" : await factsFor(actions, ctx.workspace, t, result);
 
           // Without a reviewer the task stays "En revue" for a person to check.
-          if (reviewer) {
+          if (mode === "agent" && reviewer) {
             const lastReview = attempt > 0 && t.evaluation?.verdict === "a_corriger" ? t.evaluation.comment : "";
             const review = await runAgent({
               agent: reviewer,
@@ -263,6 +318,7 @@ ${result}
 
 ## Ce que Millikin a constaté (fait foi, relevé automatiquement)
 ${facts}
+${mapSection}
 ${lastReview ? `\n## Corrections demandées au contrôle précédent\n${lastReview}\nVérifie d'abord qu'elles sont faites. N'ajoute pas de nouvelle exigence qui n'est pas dans la consigne.\n` : ""}
 Vérifie le TRAVAIL RÉEL, pas les intentions : juge d'après les fichiers et leur contenu ci-dessus (et lis-en d'autres si besoin), pas d'après le compte rendu.
 - Juge l'ÉTAT ACTUEL des livrables : s'ils existent et respectent la consigne, la tâche est faite, même si cette tentative n'a rien eu à réécrire.
