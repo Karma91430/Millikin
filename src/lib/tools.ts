@@ -199,6 +199,22 @@ async function checkCommand(workspace: string): Promise<string | null> {
   return pytest ? `${venv} -m pytest -q` : `${venv} -m unittest discover -q`;
 }
 
+const runChecksTool = (ctx: ToolContext): [ToolDef, ToolImpl] => [
+  fn("run_checks", "Lancer les tests du projet avec sa commande habituelle (détectée automatiquement : npm test, make test, pytest ou unittest).", {}),
+  async () => {
+    const cmd = await checkCommand(ctx.workspace);
+    return cmd ? runCommand(cmd, ctx.workspace) : "Aucune commande de test détectée dans ce projet.";
+  },
+];
+
+/** Run the project's own checks (see checkCommand); null when the project has none Millikin can detect. */
+export async function runProjectChecks(workspace: string): Promise<{ command: string; code: number; output: string } | null> {
+  const command = await checkCommand(workspace);
+  if (!command) return null;
+  const output = await runCommand(command, workspace);
+  return { command, code: Number(output.match(/code de sortie : (\d+)/)?.[1] ?? 1), output };
+}
+
 export const TOOL_GROUPS: Group[] = [
   {
     id: "web_search",
@@ -312,6 +328,8 @@ export const TOOL_GROUPS: Group[] = [
         ),
         async (a) => editOne(ctx.workspace, a.path, a.old_text, a.new_text),
       ],
+      // Whoever writes code can run the project's tests (only the project's own command, not any shell).
+      runChecksTool(ctx),
       [
         fn(
           "edit_files",
@@ -350,13 +368,7 @@ export const TOOL_GROUPS: Group[] = [
         ),
         async (a) => runCommand(String(a.command ?? ""), a.cwd ? await inside(ctx.workspace, String(a.cwd)) : ctx.workspace),
       ],
-      [
-        fn("run_checks", "Lancer les tests du projet avec sa commande habituelle (détectée automatiquement : npm test, make test, pytest ou unittest).", {}),
-        async () => {
-          const cmd = await checkCommand(ctx.workspace);
-          return cmd ? runCommand(cmd, ctx.workspace) : "Aucune commande de test détectée : lance les tests avec run_command.";
-        },
-      ],
+      runChecksTool(ctx),
     ],
   },
   {
@@ -432,7 +444,11 @@ export const TOOL_GROUPS: Group[] = [
 export const BUILTIN_TOOLS = TOOL_GROUPS.map(({ id, label, description, danger }) => ({ id, label, description, danger: !!danger }));
 
 export function buildTools(ctx: ToolContext): [ToolDef, ToolImpl][] {
-  return TOOL_GROUPS.filter((g) => ctx.agent.tools?.includes(g.id)).flatMap((g) => g.defs(ctx));
+  // A tool offered by two groups (run_checks) is given once.
+  const seen = new Set<string>();
+  return TOOL_GROUPS.filter((g) => ctx.agent.tools?.includes(g.id))
+    .flatMap((g) => g.defs(ctx))
+    .filter(([d]) => !seen.has(d.function.name) && (seen.add(d.function.name), true));
 }
 
 /** Workspace folder (a project's path, or a default one by name), created on first use. */
