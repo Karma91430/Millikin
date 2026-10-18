@@ -92,6 +92,35 @@ Appuie-toi sur les chiffres ; sois factuel, bref et constructif.`;
 
 const READ_ONLY = ["board_add_card", "board_update_card", "write_file", "edit_file", "run_command", "http_request", "record_decision"];
 
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** A ticket of a planned sprint starts: the sprint becomes the active one (unless another is still running). */
+export function activateSprintFor(task: Task) {
+  const sprint = task.sprint_id ? get<Sprint>("sprints", task.sprint_id) : undefined;
+  if (!sprint || sprint.status !== "planned") return;
+  const busy = list<Sprint>("sprints").some((s) => s.project_id === sprint.project_id && s.status === "active" && s.id !== sprint.id);
+  if (!busy) upsert("sprints", { id: sprint.id, status: "active", start_date: sprint.start_date || today() });
+}
+
+/**
+ * A ticket was validated: when it was the last open ticket of its sprint, the sprint is closed and its review
+ * starts (the agents run the work, nobody has to close the sprint by hand). Returns true when it closed it.
+ */
+export function closeSprintIfDone(task: Task): boolean {
+  const sprint = task.sprint_id ? get<Sprint>("sprints", task.sprint_id) : undefined;
+  if (!sprint || sprint.status === "done") return false;
+  const tasks = list<Task>("tasks").filter((t) => t.sprint_id === sprint.id);
+  if (!tasks.length || tasks.some((t) => t.status !== "done")) return false;
+  const analytics = sprintAnalytics(sprint);
+  upsert("sprints", { id: sprint.id, status: "done", start_date: sprint.start_date || today(), end_date: sprint.end_date || today() });
+  try {
+    startSprintReview(sprint.id, analytics);
+  } catch {
+    // No first contact or a review already running: the sprint stays closed, the review can be run from Pilotage.
+  }
+  return true;
+}
+
 /** Start (or restart) the review of a sprint in the background. */
 export function startSprintReview(sprintId: string, analytics?: SprintAnalytics): Run {
   const sprint = get<Sprint>("sprints", sprintId);

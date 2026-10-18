@@ -1,6 +1,7 @@
 import { assertCanCreateProject, assertTeamSize, canSeeProject, denied, guard, guardProject, type Need, type User } from "@/lib/access";
-import { ENTITIES, get, list, remove, upsert, type Project } from "@/lib/db";
+import { ENTITIES, get, list, remove, upsert, type Project, type Task } from "@/lib/db";
 import { disconnectMcp } from "@/lib/mcp";
+import { closeSprintIfDone } from "@/lib/sprintreview";
 
 type Ctx = { params: Promise<{ entity: string }> };
 
@@ -73,7 +74,10 @@ export async function POST(req: Request, ctx: Ctx) {
     }
     if (entity === "providers" && data.api_key === "••••••••") delete data.api_key;
     if (entity === "mcp" && data.id) await disconnectMcp(String(data.id));
-    return Response.json(upsert(entity, data));
+    const saved = upsert(entity, data);
+    // A ticket moved to Done by hand may complete its sprint, like one validated by a run.
+    if (entity === "tasks" && data.status === "done" && before?.status !== "done") closeSprintIfDone(saved as Task);
+    return Response.json(saved);
   } catch (e) {
     return fail(e);
   }

@@ -11,6 +11,7 @@ import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
 import { isIgnoredEntry, projectMap } from "./projectmap";
 import { reviewMode, rigorOf } from "./rigor";
+import { activateSprintFor, closeSprintIfDone } from "./sprintreview";
 import { runProjectChecks, syntaxError, workspaceFor } from "./tools";
 
 const BOARD_WRITE = ["board_add_card", "board_update_card"];
@@ -223,6 +224,7 @@ function prepare(taskId: string, opts: { ignoreBlockers?: boolean } = {}) {
 
 export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } = {}): Run {
   const { task, project, team, assignee } = prepare(taskId, opts);
+  activateSprintFor(task);
   // Reviewer: a first contact other than the assignee, preferably one who can check (run commands, read files).
   const entries = team.spec.entry_ids.map((id) => team.agents.get(id)).filter((a): a is Agent => !!a && a.id !== assignee.id);
   const reviewer = entries.find((a) => a.tools?.includes("run_command")) ?? entries.find((a) => a.tools?.includes("files_read")) ?? entries[0];
@@ -424,6 +426,7 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
         if (lastError) await new Promise((r) => setTimeout(r, 5000));
       }
       upsert("tasks", { id: t.id, trace: run.trace });
+      if (t.status === "done") closeSprintIfDone(t);
       emit({ type: "done", messageId: "" });
     },
   );
