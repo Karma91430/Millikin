@@ -3,403 +3,483 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Millikin — AI agent teams on your machine</title>
-<meta name="description" content="Millikin is a local-first workspace where teams of AI agents scope, plan, delegate, build and review work — running entirely on Ollama.">
-<meta property="og:title" content="Millikin — AI agent teams on your machine">
-<meta property="og:description" content="Local-first AI agent teams on Ollama: visual team builder, scoping before delegation, live agent graph, Kanban with automatic reviews, sprints, RAG, skills and MCP.">
+<title>Millikin</title>
+<meta name="description" content="Millikin turns a request into tickets, assigns them to a team of agents and checks the work by running it. Open source and self-hosted, with Ollama, Claude Code, Codex or any API.">
+<meta property="og:title" content="Millikin">
+<meta property="og:description" content="Run your projects with a team of agents. Open source, self-hosted, any engine.">
 <meta property="og:image" content="assets/hero.svg">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237c6cf6'/%3E%3Ctext x='32' y='44' font-family='Arial' font-weight='700' font-size='34' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2318181b'/%3E%3Ctext x='32' y='44' font-family='Arial' font-weight='700' font-size='34' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* Page: neutral. The app mockups below use the app's own dark theme. */
   :root {
-    --bg: #0b0d12; --bg-2: #11141b; --bg-3: #171b24; --bg-4: #1f2430;
-    --line: #242a36; --line-2: #353d4d;
-    --fg: #e6e8ee; --fg-2: #9aa3b5; --fg-3: #697287;
-    --accent: #7c6cf6; --accent-2: #a89cff;
-    --amber: #f59e0b; --indigo: #6366f1; --green: #10b981; --pink: #ec4899;
-    --glow: rgba(124,108,246,.35);
+    --bg: #ffffff; --bg-2: #f4f4f5; --line: #e4e4e7; --line-2: #d4d4d8;
+    --fg: #18181b; --fg-2: #52525b; --fg-3: #8b8b94; --btn: #18181b; --btn-fg: #ffffff;
+    color-scheme: light;
   }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      --bg: #f7f8fa; --bg-2: #ffffff; --bg-3: #f1f3f7; --bg-4: #e7eaf0;
-      --line: #e2e6ee; --line-2: #cdd3de;
-      --fg: #151822; --fg-2: #4d5568; --fg-3: #7a8397;
-      --accent: #6a58f0; --accent-2: #5846e0; --glow: rgba(106,88,240,.18);
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #09090b; --bg-2: #141417; --line: #27272a; --line-2: #3f3f46;
+      --fg: #f4f4f5; --fg-2: #a1a1aa; --fg-3: #71717a; --btn: #f4f4f5; --btn-fg: #09090b;
+      color-scheme: dark;
     }
   }
-  :root[data-theme="dark"] { color-scheme: dark; }
+  :root[data-theme="dark"] {
+    --bg: #09090b; --bg-2: #141417; --line: #27272a; --line-2: #3f3f46;
+    --fg: #f4f4f5; --fg-2: #a1a1aa; --fg-3: #71717a; --btn: #f4f4f5; --btn-fg: #09090b;
+    color-scheme: dark;
+  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
-  a { color: inherit; text-decoration: none; }
-  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 20px; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 Geist, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  a { color: inherit; }
+  code, pre { font-family: "Geist Mono", ui-monospace, monospace; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  @media (min-width: 720px) { .wrap { padding: 0 24px; } }
 
-  /* nav */
-  nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px); background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--line); }
-  nav .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
-  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-  .logo span { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 16px; }
-  nav .links { display: flex; gap: 22px; margin-left: auto; color: var(--fg-2); font-size: 14px; }
-  nav .links a:hover { color: var(--fg); }
-  .btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: 11px; font-weight: 600; font-size: 15px; border: 1px solid var(--line-2); background: var(--bg-3); transition: .15s; }
-  .btn:hover { border-color: var(--fg-3); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 8px 30px -8px var(--glow); }
-  .btn.primary:hover { filter: brightness(1.08); }
-  .btn.sm { height: 36px; font-size: 14px; padding: 0 14px; }
-  @media (max-width: 760px) { nav .links { display: none; } nav .btn.sm { margin-left: auto; } }
+  header.top .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; text-decoration: none; }
+  .logo span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: var(--btn); color: var(--btn-fg); font-size: 14px; font-weight: 700; }
+  .top nav { display: flex; gap: 22px; margin-left: auto; font-size: 14.5px; color: var(--fg-2); }
+  .top nav a { text-decoration: none; }
+  .top nav a:hover { color: var(--fg); }
+  @media (max-width: 640px) { .top nav a.opt { display: none; } }
 
-  /* hero */
-  .hero { position: relative; padding: 72px 0 40px; }
-  .hero::before { content: ""; position: absolute; inset: -200px 0 auto; height: 700px; background: radial-gradient(600px 300px at 30% 30%, var(--glow), transparent 70%); pointer-events: none; }
-  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
-  @media (max-width: 980px) { .hero .wrap { grid-template-columns: 1fr; } }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--fg-2); font-size: 13px; }
-  .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
-  h1 { font-size: clamp(38px, 5.6vw, 64px); line-height: 1.04; letter-spacing: -.035em; margin: 18px 0 18px; font-weight: 800; }
-  h1 em { font-style: normal; background: linear-gradient(90deg, var(--accent-2), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .lead { font-size: 19px; color: var(--fg-2); max-width: 560px; margin: 0 0 28px; }
-  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
-  .chips span { font-size: 12.5px; color: var(--fg-2); padding: 4px 10px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--line); }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 8px; font: 500 15px Geist, system-ui, sans-serif; text-decoration: none; border: 1px solid var(--line-2); color: var(--fg); background: var(--bg); }
+  .btn:hover { background: var(--bg-2); }
+  .btn.dark { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); }
+  .btn.dark:hover { opacity: .88; }
 
-  /* live demo */
-  .demo { position: relative; aspect-ratio: 1 / .78; border-radius: 22px; border: 1px solid var(--line); background: radial-gradient(circle at 1px 1px, var(--line) 1.2px, transparent 0) 0 0 / 22px 22px, var(--bg-2); box-shadow: 0 30px 80px -30px rgba(0,0,0,.6); overflow: hidden; }
-  .demo svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .edge { fill: none; stroke: var(--line-2); stroke-width: 1.6; transition: stroke .3s, opacity .3s; }
-  .edge.on { stroke-width: 2.4; stroke-dasharray: 6 6; animation: dash .6s linear infinite; }
-  @keyframes dash { to { stroke-dashoffset: -24; } }
-  .node { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 9px; padding: 8px 12px 8px 8px; border-radius: 16px; background: var(--bg-2); border: 1.5px solid var(--line-2); min-width: 128px; box-shadow: 0 10px 30px -12px rgba(0,0,0,.5); transition: border-color .3s, box-shadow .3s; }
-  .node .av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; flex: none; }
-  .node b { display: block; font-size: 13px; }
-  .node small { display: block; font-size: 10.5px; color: var(--fg-3); }
-  .node.live { box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent), 0 10px 30px -12px rgba(0,0,0,.5); border-color: var(--c); }
-  .node.live small { color: var(--c); }
-  .bubble { position: absolute; max-width: 44%; padding: 9px 12px; border-radius: 14px; background: var(--bg-3); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); font-size: 12px; line-height: 1.45; opacity: 0; transform: translateY(6px); transition: opacity .35s, transform .35s; }
-  .bubble.show { opacity: 1; transform: none; }
-  .bubble .caret::after { content: "▍"; color: var(--accent); animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .tag { position: absolute; font-size: 10.5px; padding: 4px 8px; border-radius: 9px; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg-2); opacity: 0; transition: opacity .3s; white-space: nowrap; }
-  .tag.show { opacity: 1; }
-  .phase { position: absolute; top: 12px; left: 12px; font-size: 11px; padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); font-weight: 600; transition: .3s; }
-  .phase.exec { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
-  @media (max-width: 560px) { .node { min-width: 0; padding-right: 8px; } .node small { display: none; } .bubble { font-size: 11px; max-width: 58%; } }
+  .hero { padding: 56px 0 0; text-align: center; }
+  .hero h1 { font-size: clamp(34px, 5.4vw, 56px); line-height: 1.08; letter-spacing: -.03em; font-weight: 600; margin: 0 auto 16px; max-width: 820px; }
+  .hero p { font-size: 18px; color: var(--fg-2); max-width: 640px; margin: 0 auto 26px; }
+  .hero .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 48px; }
+
+  /* ---------- app mockup (the app's own theme) ---------- */
+  .shot { --s0: #0b0d12; --s1: #11141b; --s2: #171b24; --s3: #1f2430; --ln: #242a36; --ln2: #353d4d; --tx: #e6e8ee; --tx2: #9aa3b5; --tx3: #697287; --ac: #7c6cf6;
+    border-radius: 12px; border: 1px solid #2a2f3a; background: var(--s0); color: var(--tx); text-align: left; overflow: hidden; box-shadow: 0 24px 60px -24px rgba(0,0,0,.35); }
+  .shot .scroll { overflow-x: auto; }
+  .app { display: grid; grid-template-columns: 52px 1fr; min-width: 820px; height: 470px; font-size: 13px; }
+  .rail { background: var(--s1); border-right: 1px solid var(--ln); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; }
+  .rail .m { width: 30px; height: 30px; border-radius: 8px; background: var(--ac); display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; margin-bottom: 8px; }
+  .rail i { width: 32px; height: 32px; border-radius: 8px; display: block; position: relative; }
+  .rail i::before { content: ""; position: absolute; inset: 9px; border: 1.6px solid var(--tx3); border-radius: 3px; }
+  .rail i.on { background: color-mix(in srgb, var(--ac) 16%, transparent); }
+  .rail i.on::before { border-color: var(--ac); }
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .phead { padding: 12px 18px 0; border-bottom: 1px solid var(--ln); }
+  .phead .row { display: flex; align-items: center; gap: 10px; }
+  .phead b { font-size: 15px; }
+  .avs { display: flex; }
+  .avs span, .av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; border: 2px solid var(--s0); }
+  .avs span + span { margin-left: -6px; }
+  .phead .chat { margin-left: auto; font-size: 12px; padding: 5px 10px; border-radius: 7px; background: var(--ac); color: #fff; }
+  .ptabs { display: flex; gap: 2px; margin-top: 10px; }
+  .ptabs span { padding: 7px 11px; color: var(--tx2); border-bottom: 2px solid transparent; }
+  .ptabs span.on { color: var(--tx); border-bottom-color: var(--ac); }
+  .body { flex: 1; min-height: 0; position: relative; }
+  .view { position: absolute; inset: 0; padding: 14px 18px; display: none; }
+  .view.on { display: block; }
+
+  /* board */
+  .cols { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; height: 100%; }
+  .col { background: var(--s1); border: 1px solid var(--ln); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .col h4 { margin: 2px 4px 4px; font-size: 11.5px; font-weight: 500; color: var(--tx2); display: flex; align-items: center; gap: 6px; }
+  .col h4 i { width: 7px; height: 7px; border-radius: 50%; }
+  .col h4 em { font-style: normal; margin-left: auto; color: var(--tx3); }
+  .card { background: var(--s2); border: 1px solid var(--ln); border-radius: 8px; padding: 8px 9px; }
+  .card p { margin: 0 0 7px; font-size: 12.5px; line-height: 1.35; }
+  .card .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--tx3); }
+  .card .meta .av { width: 18px; height: 18px; font-size: 10px; border: 0; }
+  .badge { padding: 1px 6px; border-radius: 5px; font-size: 10.5px; background: var(--s3); color: var(--tx2); }
+  .badge.ok { background: rgba(16,185,129,.14); color: #34d399; }
+  .work { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ac); margin-top: 6px; }
+  .work::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ac); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  /* agents */
+  .graph { position: absolute; inset: 0; right: 290px; background: radial-gradient(circle at 1px 1px, var(--ln) 1px, transparent 0) 0 0 / 18px 18px; }
+  .graph svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .graph path { fill: none; stroke: var(--ln2); stroke-width: 1.5; }
+  .graph path.on { stroke: var(--ac); stroke-dasharray: 5 5; animation: dash .7s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -20; } }
+  .gn { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 7px 11px 7px 7px; border-radius: 12px; background: var(--s1); border: 1.5px solid var(--ln2); }
+  .gn .av { width: 28px; height: 28px; font-size: 14px; border: 0; }
+  .gn b { display: block; font-size: 12.5px; font-weight: 600; }
+  .gn small { display: block; font-size: 10.5px; color: var(--tx3); }
+  .gn.live { border-color: var(--c); box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 20%, transparent); }
+  .gn.live small { color: var(--c); }
+  .side { position: absolute; top: 0; right: 0; bottom: 0; width: 290px; border-left: 1px solid var(--ln); background: var(--s1); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.45; background: var(--s2); border: 1px solid var(--ln); }
+  .msg .who { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--tx2); margin-bottom: 4px; }
+  .msg .who .av { width: 16px; height: 16px; font-size: 9px; border: 0; }
+  .tool { display: inline-flex; gap: 6px; margin: 4px 4px 0 0; padding: 2px 7px; border-radius: 6px; background: var(--s3); font: 10.5px "Geist Mono", monospace; color: var(--tx2); }
+  .caret::after { content: "▍"; color: var(--ac); animation: pulse 1s steps(1) infinite; }
+
+  /* traces */
+  .tr { display: grid; grid-template-columns: 210px 1fr; gap: 14px; height: 100%; }
+  .runs { border: 1px solid var(--ln); border-radius: 10px; background: var(--s1); padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .run { padding: 7px 8px; border-radius: 7px; font-size: 12px; }
+  .run.on { background: var(--s3); }
+  .run small { display: block; color: var(--tx3); font-size: 10.5px; }
+  .tl { border: 1px solid var(--ln); border-radius: 10px; background: var(--s1); padding: 12px 14px; }
+  .tl h5 { margin: 0 0 10px; font-size: 12.5px; font-weight: 600; display: flex; justify-content: space-between; }
+  .tl h5 span { font-weight: 400; color: var(--tx3); font-size: 11px; }
+  .bar { display: grid; grid-template-columns: 140px 1fr 70px; align-items: center; gap: 10px; padding: 4px 0; font-size: 11.5px; }
+  .bar .lane { position: relative; height: 16px; border-radius: 4px; background: color-mix(in srgb, var(--s3) 60%, transparent); }
+  .bar .lane b { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; }
+  .bar .lane i { position: absolute; top: 0; width: 2px; height: 16px; background: var(--tx2); }
+  .bar em { font-style: normal; color: var(--tx3); text-align: right; font-family: "Geist Mono", monospace; font-size: 10.5px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .stats div { border: 1px solid var(--ln); border-radius: 8px; padding: 8px 10px; background: var(--s2); font-size: 11px; color: var(--tx3); }
+  .stats b { display: block; font-size: 16px; color: var(--tx); font-weight: 600; }
+
+  /* bench */
+  .bt { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .bt th { text-align: left; font-weight: 500; color: var(--tx3); padding: 6px 8px; border-bottom: 1px solid var(--ln2); }
+  .bt td { padding: 8px; border-bottom: 1px solid var(--ln); }
+  .bt td.n, .bt th.n { text-align: right; font-family: "Geist Mono", monospace; }
+  .bt .cfg { font-weight: 600; }
+  .bt .cfg small { display: block; font-weight: 400; color: var(--tx3); font-size: 10.5px; }
+
+  .switch { display: flex; justify-content: center; gap: 6px; margin: 18px auto 10px; flex-wrap: wrap; }
+  .switch button { font: 500 14px Geist, system-ui, sans-serif; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--fg-2); cursor: pointer; }
+  .switch button.on { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); }
+  .caption { text-align: center; color: var(--fg-2); font-size: 15px; min-height: 24px; margin: 0 0 8px; }
 
   /* sections */
-  section { padding: 80px 0; }
-  .eyebrow { color: var(--accent-2); font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
-  h2 { font-size: clamp(28px, 3.6vw, 42px); letter-spacing: -.025em; line-height: 1.12; margin: 10px 0 14px; }
-  .sub { color: var(--fg-2); font-size: 17px; max-width: 640px; margin: 0; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 40px; }
-  @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
-  .card { padding: 22px; border-radius: 18px; border: 1px solid var(--line); background: var(--bg-2); transition: border-color .2s, transform .2s; }
-  .card:hover { border-color: var(--line-2); transform: translateY(-2px); }
-  .card .ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; font-size: 20px; background: var(--bg-4); margin-bottom: 14px; }
-  .card h3 { margin: 0 0 6px; font-size: 16.5px; }
-  .card p { margin: 0; color: var(--fg-2); font-size: 14.5px; }
+  section { padding: 88px 0 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+  .two > * { min-width: 0; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; gap: 28px; } }
+  h2 { font-size: clamp(26px, 3.2vw, 36px); letter-spacing: -.025em; line-height: 1.15; font-weight: 600; margin: 0 0 14px; }
+  .lead { color: var(--fg-2); font-size: 17px; margin: 0 0 16px; }
+  .points { margin: 18px 0 0; padding: 0; list-style: none; }
+  .points li { padding: 10px 0 10px 18px; border-top: 1px solid var(--line); color: var(--fg-2); position: relative; }
+  .points li::before { content: ""; position: absolute; left: 0; top: 19px; width: 7px; height: 7px; border-radius: 2px; background: var(--fg-3); }
+  .points b { color: var(--fg); font-weight: 600; }
 
-  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px; counter-reset: s; }
-  @media (max-width: 900px) { .steps { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 520px) { .steps { grid-template-columns: 1fr; } }
-  .step { position: relative; padding: 22px; border-radius: 18px; background: var(--bg-2); border: 1px solid var(--line); }
-  .step::before { counter-increment: s; content: counter(s); display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; margin-bottom: 14px; }
-  .step h3 { margin: 0 0 6px; font-size: 16px; }
-  .step p { margin: 0; color: var(--fg-2); font-size: 14px; }
+  /* small mock panels */
+  .panel { border-radius: 12px; border: 1px solid #2a2f3a; background: #0b0d12; color: #e6e8ee; padding: 16px; font-size: 13px; box-shadow: 0 18px 50px -24px rgba(0,0,0,.35); }
+  .panel .title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  .note { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid #242a36; font-size: 12.5px; color: #9aa3b5; }
+  .note b { color: #e6e8ee; font-weight: 500; }
+  .note .t { font-family: "Geist Mono", monospace; font-size: 11px; color: #697287; }
+  .engines { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .eng { border: 1px solid #242a36; border-radius: 10px; padding: 12px; background: #11141b; }
+  .eng.on { border-color: #7c6cf6; }
+  .eng b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .eng small { display: block; color: #9aa3b5; font-size: 11.5px; line-height: 1.4; margin-bottom: 10px; }
+  .eng .pick { display: flex; gap: 6px; }
+  .eng .sel { flex: 1; border: 1px solid #353d4d; border-radius: 7px; padding: 5px 8px; font-size: 12px; color: #e6e8ee; background: #171b24; }
+  .eng .use { border-radius: 7px; padding: 5px 10px; font-size: 12px; background: #7c6cf6; color: #fff; }
+  .eng.on .use { background: #1f2430; color: #9aa3b5; }
+  @media (max-width: 480px) { .engines { grid-template-columns: 1fr; } }
 
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
-  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-  .list { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
-  .list li { display: flex; gap: 12px; color: var(--fg-2); font-size: 15px; }
-  .list li b { color: var(--fg); font-weight: 600; }
-  .list li::before { content: "✓"; flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); margin-top: 1px; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  table.data th { text-align: left; font-weight: 500; color: var(--fg-3); font-size: 13px; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line-2); }
+  table.data td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); }
+  table.data td.n, table.data th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; }
+  .small { color: var(--fg-3); font-size: 13.5px; margin-top: 10px; }
 
-  .term { border-radius: 16px; border: 1px solid var(--line); background: var(--bg-2); overflow: hidden; }
-  .term .bar { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .term .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--bg-4); }
-  pre { margin: 0; padding: 18px 20px; font-size: 13.5px; line-height: 1.75; overflow-x: auto; color: var(--fg-2); }
-  pre .c { color: var(--fg-3); }
-  pre .k { color: var(--accent-2); }
+  .term { border-radius: 12px; background: #0b0d12; color: #c9cfdb; border: 1px solid #2a2f3a; }
+  .term pre { margin: 0; padding: 18px 20px; font-size: 13.5px; line-height: 1.75; overflow-x: auto; }
+  .term .c { color: #697287; }
 
-  .band { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg-2); }
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding: 36px 0; }
-  @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } }
-  .stats div b { display: block; font-size: 30px; letter-spacing: -.02em; }
-  .stats div span { color: var(--fg-2); font-size: 14px; }
+  .also { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .also span { font-size: 14px; padding: 6px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); color: var(--fg-2); }
 
-  .final { text-align: center; }
-  .final .cta { justify-content: center; margin-top: 28px; }
-  footer { border-top: 1px solid var(--line); padding: 28px 0; color: var(--fg-3); font-size: 14px; }
-  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+  footer { margin-top: 96px; border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--fg-3); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
 
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 </style>
 </head>
 <body>
 
-<nav>
+<header class="top">
   <div class="wrap">
     <a class="logo" href="#"><span>M</span>Millikin</a>
-    <div class="links">
-      <a href="#features">Features</a>
-      <a href="#how">How it works</a>
-      <a href="#local">Local models</a>
-      <a href="#start">Get started</a>
-    </div>
-    <a class="btn sm" href="https://github.com/Karma91430/Millikin">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      GitHub
-    </a>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap">
-    <div>
-      <span class="pill"><i></i> 100% local · runs on Ollama</span>
-      <h1>Your AI team,<br><em>running on your machine.</em></h1>
-      <p class="lead">Millikin is a local-first workspace where teams of AI agents scope your idea, ask the right questions, split the work, build it and review each other — with no cloud and no API bill.</p>
-      <div class="cta">
-        <a class="btn primary" href="#start">Get started</a>
-        <a class="btn" href="https://github.com/Karma91430/Millikin">View on GitHub</a>
-      </div>
-      <div class="chips">
-        <span>Visual team builder</span><span>Scoping before delegation</span><span>Live agent graph</span><span>Kanban + auto-review</span><span>Sprints</span><span>RAG · Skills · MCP</span>
-      </div>
-    </div>
-
-    <div class="demo" id="demo" aria-label="Animated example: two first contacts scope a request, then delegate to a developer and a tester">
-      <span class="phase" id="phase">scoping</span>
-      <svg class="edges" viewBox="0 0 100 78" preserveAspectRatio="none" aria-hidden="true">
-        <path id="e-user-pl" class="edge" d="M22 44 C 27 44, 27 30, 32 30" vector-effect="non-scaling-stroke"/>
-        <path id="e-pl-tl" class="edge" d="M44 34 L 44 54" vector-effect="non-scaling-stroke"/>
-        <path id="e-tl-dev" class="edge" d="M56 58 C 66 58, 66 30, 76 30" vector-effect="non-scaling-stroke"/>
-        <path id="e-tl-qa" class="edge" d="M56 58 C 66 58, 66 64, 76 64" vector-effect="non-scaling-stroke"/>
-      </svg>
-      <div class="node" id="n-user" style="left:15%;top:56%;--c:#94a3b8"><div class="av" style="background:var(--bg-4)">🙂</div><div><b>You</b><small>idle</small></div></div>
-      <div class="node" id="n-pl" style="left:44%;top:38%;--c:var(--amber)"><div class="av" style="background:color-mix(in srgb,var(--amber) 18%,transparent)">📅</div><div><b>Project lead ★</b><small>available</small></div></div>
-      <div class="node" id="n-tl" style="left:44%;top:74%;--c:var(--indigo)"><div class="av" style="background:color-mix(in srgb,var(--indigo) 18%,transparent)">🧑‍💻</div><div><b>Tech lead ★</b><small>available</small></div></div>
-      <div class="node" id="n-dev" style="left:84%;top:38%;--c:var(--green)"><div class="av" style="background:color-mix(in srgb,var(--green) 18%,transparent)">💻</div><div><b>Developer</b><small>available</small></div></div>
-      <div class="node" id="n-qa" style="left:84%;top:82%;--c:var(--pink)"><div class="av" style="background:color-mix(in srgb,var(--pink) 18%,transparent)">🧪</div><div><b>Tester</b><small>available</small></div></div>
-      <div class="bubble" id="b-user" style="left:3%;top:13%;max-width:25%;--c:#94a3b8"></div>
-      <div class="bubble" id="b-pl" style="left:30%;top:4%;--c:var(--amber)"></div>
-      <div class="bubble" id="b-dev" style="left:54%;top:48%;--c:var(--green)"></div>
-      <span class="tag" id="t-dev" style="left:57%;top:44%"></span>
-    </div>
+    <nav>
+      <a class="opt" href="#tickets">How it works</a>
+      <a class="opt" href="#engines">Engines</a>
+      <a class="opt" href="#numbers">Numbers</a>
+      <a href="https://github.com/Karma91430/Millikin">GitHub</a>
+    </nav>
   </div>
 </header>
 
-<div class="band">
-  <div class="wrap stats">
-    <div><b>0 €</b><span>API cost — every model runs locally</span></div>
-    <div><b>34</b><span>ready-made agent profiles, tools included</span></div>
-    <div><b>1 command</b><span>to start: <code>npm run dev</code></span></div>
-    <div><b>/api/v1</b><span>OpenAI-compatible proxy for your other tools</span></div>
+<div class="hero">
+  <div class="wrap">
+    <h1>Run your projects with a team of agents.</h1>
+    <p>Millikin turns a request into tickets, gives them to agents and checks the work by running it. It is open source, runs on your machine, and works with Ollama, Claude Code, Codex or any API.</p>
+    <div class="actions">
+      <a class="btn dark" href="#install">Install</a>
+      <a class="btn" href="https://github.com/Karma91430/Millikin">View on GitHub</a>
+    </div>
+
+    <div class="shot" id="shot">
+      <div class="scroll">
+        <div class="app">
+          <div class="rail"><div class="m">M</div><i></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+          <div class="main">
+            <div class="phead">
+              <div class="row"><b>Currency converter</b><div class="avs"><span style="background:#6366f133">🧭</span><span style="background:#10b98133">💻</span><span style="background:#ec489933">🧪</span><span style="background:#f59e0b33">📋</span></div><span class="chat">Chat with the team</span></div>
+              <div class="ptabs" id="ptabs"><span>Overview</span><span class="on" data-v="board">Tasks (6)</span><span data-v="agents">Team (4)</span><span data-v="traces">Management</span></div>
+            </div>
+            <div class="body">
+              <!-- board -->
+              <div class="view on" data-view="board">
+                <div class="cols">
+                  <div class="col"><h4><i style="background:#9aa3b5"></i>To do<em>2</em></h4>
+                    <div class="card"><p>Cache rates for one hour</p><div class="meta"><span class="av" style="background:#10b98133">💻</span><span class="badge">3 pts</span></div></div>
+                    <div class="card"><p>README and usage examples</p><div class="meta"><span class="av" style="background:#6366f133">🧭</span><span class="badge">1 pt</span></div></div>
+                  </div>
+                  <div class="col"><h4><i style="background:#f87171"></i>Retry<em>0</em></h4></div>
+                  <div class="col"><h4><i style="background:#f59e0b"></i>In progress<em id="prog-count">1</em></h4>
+                    <div class="card" id="moving"><p>Convert between two currencies</p><div class="meta"><span class="av" style="background:#10b98133">💻</span><span class="badge">5 pts</span></div><div class="work">Developer is working</div></div>
+                  </div>
+                  <div class="col" id="col-review"><h4><i style="background:#7c6cf6"></i>In review<em id="rv-count">0</em></h4></div>
+                  <div class="col" id="col-done"><h4><i style="background:#10b981"></i>Done<em id="done-count">2</em></h4>
+                    <div class="card"><p>Fetch daily rates from the API</p><div class="meta"><span class="av" style="background:#10b98133">💻</span><span class="badge ok">✓ 4/5</span></div></div>
+                    <div class="card"><p>Error when the API is down</p><div class="meta"><span class="av" style="background:#ec489933">🧪</span><span class="badge ok">✓ auto</span></div></div>
+                  </div>
+                </div>
+              </div>
+              <!-- agents -->
+              <div class="view" data-view="agents">
+                <div class="graph">
+                  <svg id="edges"></svg>
+                  <div class="gn" id="g-you" style="left:13%;top:62%"><span class="av" style="background:#94a3b833">🙂</span><div><b>You</b><small>idle</small></div></div>
+                  <div class="gn live" id="g-tl" style="left:29%;top:30%;--c:#6366f1"><span class="av" style="background:#6366f133">🧭</span><div><b>Tech lead</b><small>assigning</small></div></div>
+                  <div class="gn live" id="g-dev" style="left:76%;top:22%;--c:#10b981"><span class="av" style="background:#10b98133">💻</span><div><b>Developer</b><small>writing files</small></div></div>
+                  <div class="gn" id="g-qa" style="left:76%;top:72%"><span class="av" style="background:#ec489933">🧪</span><div><b>QA engineer</b><small>waiting</small></div></div>
+                </div>
+                <div class="side">
+                  <div class="msg"><div class="who"><span class="av" style="background:#6366f133">🧭</span>Tech lead → Developer</div>Implement convert(amount, from, to) in converter.py, use the cached rates, and add tests.</div>
+                  <div class="msg"><div class="who"><span class="av" style="background:#10b98133">💻</span>Developer</div><span class="tool">read_files rates.py, cli.py</span><span class="tool">write_file converter.py</span><span class="tool">run_checks</span><div style="margin-top:6px" id="typing" class="caret"></div></div>
+                </div>
+              </div>
+              <!-- traces -->
+              <div class="view" data-view="traces">
+                <div class="tr">
+                  <div class="runs">
+                    <div class="run on">Convert between two currencies<small>4 min · 2 agents · 41k tokens</small></div>
+                    <div class="run">Fetch daily rates from the API<small>6 min · 2 agents · 63k tokens</small></div>
+                    <div class="run">Planning<small>40 s · 1 agent</small></div>
+                    <div class="run">Sprint 1 review<small>2 min · 2 agents</small></div>
+                  </div>
+                  <div class="tl">
+                    <h5>Timeline <span>click a row to see the request, tools and answer</span></h5>
+                    <div class="bar"><span>💻 Developer</span><span class="lane"><b style="left:0;width:68%;background:#10b98199"></b><i style="left:8%"></i><i style="left:22%"></i><i style="left:47%"></i><i style="left:61%"></i></span><em>2 min 41</em></div>
+                    <div class="bar"><span>🧭 Tech lead (review)</span><span class="lane"><b style="left:70%;width:28%;background:#6366f199"></b><i style="left:80%"></i></span><em>58 s</em></div>
+                    <div class="stats"><div><b>3</b>model calls</div><div><b>7</b>tool calls · 0 errors</div><div><b>41k</b>tokens</div></div>
+                  </div>
+                </div>
+              </div>
+              <!-- bench -->
+              <div class="view" data-view="bench">
+                <table class="bt">
+                  <thead><tr><th>Configuration</th><th>Scenario</th><th class="n">Hidden tests</th><th class="n">First try</th><th class="n">Time</th><th class="n">Tokens in / out</th></tr></thead>
+                  <tbody>
+                    <tr><td class="cfg">Millikin team<small>Sonnet · Prototype</small></td><td>Library manager</td><td class="n"><span class="badge ok">10/10</span></td><td class="n">4/4</td><td class="n">3 min</td><td class="n">236k / 26k</td></tr>
+                    <tr><td></td><td>Sales report</td><td class="n"><span class="badge ok">5/5</span></td><td class="n">2/2</td><td class="n">1 min</td><td class="n">82k / 9k</td></tr>
+                    <tr><td class="cfg">Engine alone<small>Claude Code · Sonnet</small></td><td>Library manager</td><td class="n"><span class="badge ok">10/10</span></td><td class="n">–</td><td class="n">1 min</td><td class="n">237k / 14k</td></tr>
+                    <tr><td></td><td>Sales report</td><td class="n"><span class="badge ok">5/5</span></td><td class="n">–</td><td class="n">30 s</td><td class="n">257k / 4k</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="switch" id="switch">
+      <button class="on" data-v="board">Board</button>
+      <button data-v="agents">Agents</button>
+      <button data-v="traces">Traces</button>
+      <button data-v="bench">Test bench</button>
+    </div>
+    <p class="caption" id="caption">Tickets move on their own, and each one is checked before it lands in Done.</p>
   </div>
 </div>
 
-<section id="features">
-  <div class="wrap">
-    <div class="eyebrow">Features</div>
-    <h2>Everything a small AI team needs</h2>
-    <p class="sub">Think of it as LiteLLM and an agent workspace fused together — with a board, sprints and a visual view of who is talking to whom.</p>
-    <div class="grid">
-      <div class="card"><div class="ic">🕸️</div><h3>Visual team builder</h3><p>Drag agents onto a canvas, draw “can delegate to” links and mark one or more first points of contact.</p></div>
-      <div class="card"><div class="ic">🧭</div><h3>Scoping before delegation</h3><p>First contacts consult each other, restate your need and ask questions. Nothing is delegated until you click “Validate”.</p></div>
-      <div class="card"><div class="ic">💬</div><h3>Live agent graph</h3><p>Watch bubbles fill in real time, links light up during delegations, and expand any agent’s answer while it is still writing.</p></div>
-      <div class="card"><div class="ic">🗂️</div><h3>Projects with their own folder</h3><p>Each project gets a dedicated workspace, a Kanban board and its own copy of the team. Agents write well-organised files.</p></div>
-      <div class="card"><div class="ic">▶️</div><h3>Launch tasks, get reviews</h3><p>Start a card from the board: the assignee does it, a lead reviews it with a score and comment, and the status updates itself.</p></div>
-      <div class="card"><div class="ic">⛓️</div><h3>Dependencies & chains</h3><p>Link tasks together. Results and a shared decision log flow to the next agent; run a whole chain in dependency order.</p></div>
-      <div class="card"><div class="ic">🏃</div><h3>Planning & sprints</h3><p>One click and the project lead, with the tech lead, breaks the project into estimated tasks grouped into sprints.</p></div>
-      <div class="card"><div class="ic">🔌</div><h3>RAG, skills and MCP</h3><p>Index your docs locally, attach reusable skills, and plug in any MCP server — files, Git, browser, GitHub, Jira…</p></div>
-      <div class="card"><div class="ic">📊</div><h3>Gateway & stats</h3><p>Ollama console, per-agent and per-project usage, and an OpenAI-compatible endpoint your IDE or scripts can call.</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="how" class="band">
-  <div class="wrap">
-    <div class="eyebrow">How it works</div>
-    <h2>From an idea to reviewed work</h2>
-    <p class="sub">A project runs like a real team would run it — just faster, and on your laptop.</p>
-    <div class="steps">
-      <div class="step"><h3>Describe your idea</h3><p>Pick a team template, create a project and tell the first contacts what you want.</p></div>
-      <div class="step"><h3>They scope it with you</h3><p>The project lead and tech lead compare views, propose an approach and ask their questions.</p></div>
-      <div class="step"><h3>You validate</h3><p>Answer, then click “Validate & launch”. The scoping becomes the first entry of the decision log.</p></div>
-      <div class="step"><h3>The team delivers</h3><p>Work is split along the team links, results are reviewed, corrections requested, and you get a report.</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="local">
-  <div class="wrap split">
+<section id="tickets">
+  <div class="wrap two">
     <div>
-      <div class="eyebrow">Built for local models</div>
-      <h2>Designed around what small models actually do</h2>
-      <p class="sub">Millikin was tuned by running real teams on an 8B model on a laptop.</p>
-      <ul class="list">
-        <li><span><b>Few, distinct tools per agent</b> — small models choose far better among three to five clearly named tools.</span></li>
-        <li><span><b>Thinking with a safety cap</b> — leads reason before acting; runaway reasoning is cut and answered directly.</span></li>
-        <li><span><b>Nudges when an agent only announces an action</b> — “I’ll ask the developer…” actually happens.</span></li>
-        <li><span><b>Background runs</b> — answers take minutes locally, so they keep going while you switch screens, and notify you.</span></li>
-        <li><span><b>Native Ollama API</b> — context size, keep-alive and thinking are set per call, with model capabilities detected.</span></li>
+      <h2>What happens to a ticket</h2>
+      <p class="lead">You describe the project. The lead agents ask their questions, then split the work into tickets sized for the project.</p>
+      <ul class="points">
+        <li><b>An agent takes it.</b> It gets a map of the project and short notes from the tickets it depends on, so it doesn't start from zero.</li>
+        <li><b>The work is checked by running it.</b> Files must parse and the tests must pass. Bigger tickets are also reviewed by a lead.</li>
+        <li><b>If it fails, it goes back</b> with the reason, and can be retried with a stronger model. If your plan runs out of quota, the chain pauses instead.</li>
       </ul>
     </div>
-    <div class="term">
-      <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># what a project run looks like</span>
-<span class="k">You</span>            → Project lead ★
-<span class="k">Project lead</span>   ↔ Tech lead ★        <span class="c">consultation</span>
-<span class="k">Project lead</span>   → You                <span class="c">approach + 3 questions</span>
-<span class="k">You</span>            ✅ Validate &amp; launch
-<span class="k">Tech lead</span>      → Developer          <span class="c">write src/converter.py</span>
-<span class="k">Tech lead</span>      → Tester             <span class="c">tests/test_converter.py</span>
-<span class="k">Tech lead</span>      ↩ Developer          <span class="c">fix rounding</span>
-<span class="k">Project lead</span>   → You                <span class="c">report · decisions logged</span></pre>
+    <div class="panel">
+      <div class="title"><span class="av" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;background:#10b98133">💻</span>#14 Convert between two currencies <span class="badge ok" style="margin-left:auto">Done · 4/5</span></div>
+      <div class="note"><span class="t">10:02</span><span><b>Started.</b> Developer is on it.</span></div>
+      <div class="note"><span class="t">10:05</span><span><b>Result.</b> converter.py and tests/test_converter.py written. pytest: 12 passed.</span></div>
+      <div class="note"><span class="t">10:05</span><span><b>Check.</b> Files parse, last test run passed (code 0).</span></div>
+      <div class="note"><span class="t">10:06</span><span><b>Review by Tech lead.</b> Rounding follows the spec; consider a clearer error for unknown currencies.</span></div>
     </div>
   </div>
 </section>
 
-<section id="start" class="band">
-  <div class="wrap split">
+<section id="engines">
+  <div class="wrap two">
+    <div class="panel">
+      <div class="title">Settings · AI engine</div>
+      <div class="engines">
+        <div class="eng"><b>Ollama (local)</b><small>Models on this machine. Free and private.</small><div class="pick"><span class="sel">qwen3:8b</span><span class="use">Use</span></div></div>
+        <div class="eng on"><b>Claude Code</b><small>Your Claude subscription through the CLI.</small><div class="pick"><span class="sel">sonnet</span><span class="use">In use</span></div></div>
+        <div class="eng"><b>Codex</b><small>Your OpenAI account through the Codex CLI.</small><div class="pick"><span class="sel">gpt-5</span><span class="use">Use</span></div></div>
+        <div class="eng"><b>Any API</b><small>OpenAI, Anthropic, Mistral, Groq, OpenRouter, LM Studio…</small><div class="pick"><span class="sel">model</span><span class="use">Use</span></div></div>
+      </div>
+    </div>
     <div>
-      <div class="eyebrow">Get started</div>
-      <h2>Up and running in a minute</h2>
-      <p class="sub">You need Node.js 22+ and <a href="https://ollama.com" style="color:var(--accent-2)">Ollama</a> with a model that supports tools (for example <code>qwen3:8b</code>) and an embedding model (for example <code>nomic-embed-text</code>).</p>
-      <p class="sub" style="margin-top:14px">On first launch Millikin detects your installed models and creates a demo team template. The interface is in French.</p>
+      <h2>Pick the engine, keep the method</h2>
+      <p class="lead">Change engine for the whole platform or for one agent: a strong model for the leads, a fast one for the others. Planning, tools, checks and memory are Millikin's own code, so they work the same with every engine.</p>
+      <p class="lead">Ollama is the default, so nothing leaves your machine unless you choose another engine.</p>
+    </div>
+  </div>
+</section>
+
+<section id="numbers">
+  <div class="wrap">
+    <h2>How much it costs compared with the engine alone</h2>
+    <p class="lead" style="max-width:720px">The test bench gives the same projects to a Millikin team and to the engine on its own, then runs tests the agents never see. Both pass every test. Millikin reads less, and writes more because each ticket keeps a report.</p>
+    <div class="tablewrap">
+      <table class="data">
+        <thead><tr><th>Project</th><th class="n">Millikin, tokens in / out</th><th class="n">Engine alone, tokens in / out</th><th class="n">Hidden tests</th></tr></thead>
+        <tbody>
+          <tr><td>Statistics library</td><td class="n">44k / 6k</td><td class="n">115k / 2k</td><td class="n">6/6 and 6/6</td></tr>
+          <tr><td>Task manager CLI</td><td class="n">58k / 8k</td><td class="n">116k / 3k</td><td class="n">5/5 and 5/5</td></tr>
+          <tr><td>Sales report from a CSV</td><td class="n">82k / 9k</td><td class="n">257k / 4k</td><td class="n">5/5 and 5/5</td></tr>
+          <tr><td>Library manager (package, rules, CLI)</td><td class="n">236k / 26k</td><td class="n">237k / 14k</td><td class="n">10/10 and 10/10</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">Claude Sonnet on both sides, Prototype mode, October 2026. You can run the same comparison from Settings, Test bench.</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap two">
+    <div>
+      <h2>Install</h2>
+      <p class="lead">You need Node.js 22 or newer and one engine: Ollama with a model that supports tools, the Claude Code or Codex CLI, or an API key.</p>
+      <p class="lead">On first start, Millikin finds your models and creates a demo team. The interface is in English and French.</p>
+      <div class="also"><span>Knowledge bases</span><span>MCP servers</span><span>Skills per role</span><span>Sprint reviews</span><span>User accounts and credits</span><span>Local network access</span></div>
     </div>
     <div class="term">
-      <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># models</span>
+<pre><span class="c"># optional: a local model</span>
 ollama pull qwen3:8b
-ollama pull nomic-embed-text
 
-<span class="c"># app</span>
 git clone https://github.com/Karma91430/Millikin.git
 cd Millikin
 npm install
-npm run dev   <span class="c"># → http://127.0.0.1:3210</span></pre>
-    </div>
-  </div>
-</section>
-
-<section class="final">
-  <div class="wrap">
-    <h2>Give your ideas a team.</h2>
-    <p class="sub" style="margin:0 auto">Open source (MIT), local-first, and made to work with the models you already run.</p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/Karma91430/Millikin">Star it on GitHub</a>
-      <a class="btn" href="https://github.com/Karma91430/Millikin#readme">Read the docs</a>
+npm run dev   <span class="c"># http://127.0.0.1:3210</span></pre>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <span>Millikin — AI agent teams on your machine.</span>
-    <span>MIT licensed · built with Next.js, React Flow and Ollama.</span>
+    <span>Millikin · MIT licence</span>
+    <a href="https://github.com/Karma91430/Millikin">github.com/Karma91430/Millikin</a>
   </div>
 </footer>
 
 <script>
-  // Scripted demo of a project run: scoping, validation, delegation. Loops forever.
   (() => {
-    const $ = (id) => document.getElementById(id);
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const sleep = (ms) => new Promise((r) => setTimeout(r, reduce ? Math.min(ms, 150) : ms));
-    const nodes = ["n-user", "n-pl", "n-tl", "n-dev", "n-qa"];
-    const edges = ["e-user-pl", "e-pl-tl", "e-tl-dev", "e-tl-qa"];
-    const colors = { "e-user-pl": "var(--amber)", "e-pl-tl": "var(--indigo)", "e-tl-dev": "var(--green)", "e-tl-qa": "var(--pink)" };
+    const views = ["board", "agents", "traces", "bench"];
+    const captions = {
+      board: "Tickets move on their own, and each one is checked before it lands in Done.",
+      agents: "See who is working, who asked whom, and each tool call as it happens.",
+      traces: "Every run is recorded: calls, tools, time and tokens.",
+      bench: "Compare engines on the same projects, with tests the agents never see.",
+    };
+    const tabFor = { board: "board", agents: "agents", traces: "traces", bench: "traces" };
+    let current = "board";
+    let auto = !reduce;
 
-    function state(id, label, live) {
-      const n = $(id);
-      n.classList.toggle("live", !!live);
-      n.querySelector("small").textContent = label;
+    function show(v) {
+      current = v;
+      document.querySelectorAll(".view").forEach((el) => el.classList.toggle("on", el.dataset.view === v));
+      document.querySelectorAll("#switch button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+      document.querySelectorAll("#ptabs span[data-v]").forEach((s) => s.classList.toggle("on", s.dataset.v === tabFor[v]));
+      document.getElementById("caption").textContent = captions[v];
+      if (v === "board") playBoard();
+      if (v === "agents") (drawEdges(), playTyping());
     }
-    function edge(id, on) {
-      const e = $(id);
-      e.classList.toggle("on", on);
-      e.style.stroke = on ? colors[id] : "";
-    }
-    async function type(id, text) {
-      const b = $(id);
-      b.classList.add("show");
-      b.innerHTML = '<span class="caret"></span>';
-      const span = b.firstChild;
-      // Time-based typing (~60 chars/s), so throttled timers in background tabs don't slow it down.
-      const start = performance.now();
-      while (!reduce) {
-        const n = Math.floor(((performance.now() - start) / 1000) * 60);
-        span.textContent = text.slice(0, n);
-        if (n >= text.length) break;
-        await sleep(30);
-      }
-      span.textContent = text;
-      span.classList.remove("caret");
-    }
-    function reset() {
-      nodes.forEach((n) => state(n, n === "n-user" ? "idle" : "available", false));
-      edges.forEach((e) => edge(e, false));
-      ["b-user", "b-pl", "b-dev"].forEach((b) => $(b).classList.remove("show"));
-      $("t-dev").classList.remove("show");
-      $("phase").textContent = "scoping";
-      $("phase").classList.remove("exec");
+    document.querySelectorAll("#switch button").forEach((b) => b.addEventListener("click", () => { auto = false; show(b.dataset.v); }));
+
+    // Board: the ticket in progress goes to review, then to done.
+    let boardTimer;
+    function playBoard() {
+      clearTimeout(boardTimer);
+      const card = document.getElementById("moving");
+      const work = card.querySelector(".work");
+      const badge = card.querySelector(".badge");
+      const count = (id, n) => (document.getElementById(id).textContent = n);
+      document.getElementById("prog-count").parentElement.after(card);
+      work.textContent = "Developer is working";
+      work.style.display = "";
+      badge.className = "badge";
+      badge.textContent = "5 pts";
+      count("prog-count", 1); count("rv-count", 0); count("done-count", 2);
+      if (reduce) return;
+      boardTimer = setTimeout(() => {
+        document.querySelector("#col-review h4").after(card);
+        work.textContent = "Tech lead is reviewing";
+        count("prog-count", 0); count("rv-count", 1);
+        boardTimer = setTimeout(() => {
+          document.querySelector("#col-done h4").after(card);
+          work.style.display = "none";
+          badge.className = "badge ok";
+          badge.textContent = "✓ 4/5";
+          count("rv-count", 0); count("done-count", 3);
+        }, 1800);
+      }, 1800);
     }
 
-    async function loop() {
-      for (;;) {
-        reset();
-        await sleep(700);
-        await type("b-user", "I'd like a small CLI to convert temperatures (°C, °F, K).");
-        state("n-user", "waiting", true);
-        edge("e-user-pl", true);
-        state("n-pl", "thinking…", true);
-        await sleep(900);
-        edge("e-pl-tl", true);
-        state("n-pl", "consulting the tech lead", true);
-        state("n-tl", "giving an opinion…", true);
-        await sleep(1600);
-        state("n-tl", "done", false);
-        edge("e-pl-tl", false);
-        state("n-pl", "writing…", true);
-        await type("b-pl", "Plan: Python CLI with argparse, tests in tests/. Two questions: one target unit? how many decimals?");
-        state("n-pl", "waiting for your answer", false);
-        edge("e-user-pl", false);
-        await sleep(1600);
-        $("phase").textContent = "execution";
-        $("phase").classList.add("exec");
-        await type("b-user", "One target unit, 2 decimals. ✅ Validate & launch");
-        edge("e-user-pl", true);
-        edge("e-pl-tl", true);
-        state("n-pl", "delegating", true);
-        state("n-tl", "splitting the work", true);
-        await sleep(900);
-        edge("e-tl-dev", true);
-        $("t-dev").textContent = "💬 write src/converter.py";
-        $("t-dev").classList.add("show");
-        state("n-dev", "writing files…", true);
-        await sleep(500);
-        await type("b-dev", "✍️ src/converter.py · ✍️ tests/test_converter.py — done, 41 lines.");
-        state("n-dev", "done", false);
-        edge("e-tl-dev", false);
-        edge("e-tl-qa", true);
-        state("n-qa", "testing…", true);
-        await sleep(1500);
-        state("n-qa", "✓ 6 tests pass", false);
-        edge("e-tl-qa", false);
-        state("n-tl", "reviewed ✓", false);
-        state("n-pl", "report ready", false);
-        state("n-user", "answer ready", false);
-        edge("e-pl-tl", false);
-        edge("e-user-pl", false);
-        await sleep(3200);
-      }
+    // Agents: links drawn from the boxes' real positions (right side of the caller to the left side of the callee).
+    function drawEdges() {
+      const svg = document.getElementById("edges");
+      const box = svg.getBoundingClientRect();
+      if (!box.width) return;
+      const r = (id) => document.getElementById(id).getBoundingClientRect();
+      const link = (a, b, on) => {
+        const A = r(a), B = r(b);
+        const x1 = A.right - box.left, y1 = A.top + A.height / 2 - box.top, x2 = B.left - box.left, y2 = B.top + B.height / 2 - box.top;
+        const mx = (x1 + x2) / 2;
+        return `<path${on ? ' class="on"' : ""} d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}"/>`;
+      };
+      const you = r("g-you"), tl = r("g-tl");
+      const up = `<path d="M${you.left + you.width / 2 - box.left} ${you.top - box.top} L ${tl.left + tl.width / 2 - box.left} ${tl.bottom - box.top}"/>`;
+      svg.innerHTML = up + link("g-tl", "g-dev", true) + link("g-tl", "g-qa", false);
     }
-    loop();
+    addEventListener("resize", () => current === "agents" && drawEdges());
+
+    // Agents: the developer's answer is typed.
+    let typingTimer;
+    function playTyping() {
+      clearInterval(typingTimer);
+      const el = document.getElementById("typing");
+      const text = "12 passed. convert() rounds to 2 decimals and rejects unknown codes.";
+      if (reduce) { el.textContent = text; return; }
+      let i = 0;
+      el.textContent = "";
+      typingTimer = setInterval(() => { el.textContent = text.slice(0, ++i); if (i >= text.length) clearInterval(typingTimer); }, 28);
+    }
+
+    show("board");
+    setInterval(() => { if (auto) show(views[(views.indexOf(current) + 1) % views.length]); }, 6500);
   })();
 </script>
 </body>
