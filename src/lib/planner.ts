@@ -5,7 +5,7 @@ import { get, list, newId, now, remove, upsert, type Agent, type Project, type S
 import { complete } from "./gateway";
 import { runAgent, slugify, teamRuntime } from "./orchestrator";
 import { projectMap } from "./projectmap";
-import { PLANNING_RIGOR, rigorOf } from "./rigor";
+import { defaultGranularity, PLANNING_RIGOR, rigorOf } from "./rigor";
 import { activeRunFor, startRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
 import { toPoints, workspaceFor } from "./tools";
@@ -198,7 +198,7 @@ Réponds UNIQUEMENT par un bloc JSON de cette forme, sans explication autour (le
   const plan = [answer, ...answers.reverse()].map(tryParsePlan).find((p) => p?.tasks?.length);
   if (!plan) throw new Error("Le plan n'a pas pu être lu (JSON attendu). Relance la planification.");
   // A prototype keeps its lots as tasks: splitting them would bring the ceremony back.
-  const granularity = rigor === "prototype" ? "macro" : (opts.granularity ?? "standard");
+  const granularity = rigor === "prototype" ? "macro" : (opts.granularity ?? defaultGranularity(rigor));
   if (granularity !== "macro" && plan.tasks?.length)
     plan.tasks = await refineLots({ lots: plan.tasks.filter((t) => t.title), granularity, project, members, model: planner.model, emit, signal });
 

@@ -249,7 +249,8 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
       // Everything produced during this launch, for the automatic control (continuations split the work).
       const launchWritten = new Set<string>();
       const launchCommands: Actions["commands"] = [];
-      const mode = reviewMode(rigorOf(project), t.complexity || 0);
+      // Agent review needs another first contact than the assignee; without one, Millikin checks the facts itself.
+      const mode = reviewer ? reviewMode(rigorOf(project), t.complexity || 0) : "auto";
 
       // Loop: work → review; a rejected or failed attempt is relaunched with the feedback, up to maxRetries times.
       for (let attempt = 0; ; attempt++) {
@@ -330,7 +331,7 @@ Remarques : 3 points au plus`;
 
           const facts = mode === "auto" ? "" : await factsFor(actions, ctx.workspace, t, result);
 
-          // Without a reviewer the task stays "En revue" for a person to check.
+          // Agent review (mode "agent" implies a reviewer exists).
           if (mode === "agent" && reviewer) {
             const lastReview = attempt > 0 && t.evaluation?.verdict === "a_corriger" ? t.evaluation.comment : "";
             const review = await runAgent({
