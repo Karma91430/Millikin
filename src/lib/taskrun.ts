@@ -150,6 +150,7 @@ const testToolOf = (command: string) => {
   return last.split("|")[0].match(TEST_COMMAND)?.[1];
 };
 const CODE_FILE = /\.(py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|rb|php|sh)$/;
+const VERIFY_ONLY = /\b(relecture|relire|v[ée]rifi|contr[ôo]l|valid|revue|review|audit|recette|tester les?|analyser|mesurer|inventaire)/i;
 const NOT_DONE = /(n'est pas termin[ée]e|non termin[ée]e|pas encore termin[ée]e?|je ne demande pas (?:encore )?la relecture)/i;
 
 /**
@@ -157,9 +158,12 @@ const NOT_DONE = /(n'est pas termin[ée]e|non termin[ée]e|pas encore termin[ée
  * report does not say the work is unfinished, and when code was written Millikin runs the project's tests
  * itself (whatever tools the assignee has). Returns the blocking problems (none = validated).
  */
-async function autoCheck(written: Set<string>, commands: Actions["commands"], workspace: string, report: string) {
+async function autoCheck(task: Task, written: Set<string>, commands: Actions["commands"], workspace: string, report: string) {
   const issues: string[] = [];
-  if (!written.size && !commands.length) issues.push("aucun fichier écrit et aucune commande exécutée");
+  // Running commands is not changing anything: a ticket that asks for changes must have modified files.
+  // Only checking tickets (review, verification, acceptance…) can be done without writing.
+  if (!written.size && !VERIFY_ONLY.test(`${task.title} ${task.description}`)) issues.push("aucun fichier n'a été modifié alors que la tâche demande des changements (les commandes seules ne changent rien)");
+  else if (!written.size && !commands.length) issues.push("aucun fichier écrit et aucune commande exécutée");
   for (const f of written) {
     const content = await fs.readFile(path.join(workspace, f), "utf8").catch(() => null);
     if (content === null) continue;
@@ -317,7 +321,7 @@ Remarques : 3 points au plus`;
           // Small tasks and prototypes: Millikin checks the facts itself, no model call.
           if (mode === "auto") {
             const before = t.evaluation?.verdict === "a_corriger" ? t.evaluation.comment : "";
-            const issues = await autoCheck(launchWritten, launchCommands, ctx.workspace, result);
+            const issues = await autoCheck(t, launchWritten, launchCommands, ctx.workspace, result);
             const evaluation: Evaluation = issues.length
               ? { verdict: "a_corriger", score: 2, comment: `Contrôle automatique : ${issues.join(" ; ")}.`, by: "Millikin", at: now() }
               : { verdict: "valide", score: 4, comment: `Contrôle automatique : ${launchWritten.size} fichier(s) produit(s), ${launchCommands.length} commande(s) exécutée(s), aucune erreur relevée.`, by: "Millikin", at: now() };

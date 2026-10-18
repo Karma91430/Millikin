@@ -1,5 +1,5 @@
 import { allowedToolGroups } from "./access";
-import { stripTextToolCalls } from "./toolcalls";
+import { hasIncompleteCall, stripTextToolCalls } from "./toolcalls";
 import { get, getSettings, list, newId, type Agent, type McpServer, type Project, type Skill } from "./db";
 import { appendDecision, readDecisions } from "./decisions";
 import { chatStream, effectiveModel, isQuotaError, resolveModel, type ChatMessage, type ToolDef } from "./gateway";
@@ -426,6 +426,7 @@ export async function runAgent(p: RunParams): Promise<string> {
 
     let nudged = false;
     let nudgedEmpty = false;
+    let nudgedCut = false;
     // Where each step's messages begin, to compact the steps older than the last two.
     const stepStarts: number[] = [];
     const firstOwn = messages.length;
@@ -478,6 +479,13 @@ export async function runAgent(p: RunParams): Promise<string> {
         }
         // A final answer that is only a tool call written as text is not an answer: drop the raw block.
         const text = stripTextToolCalls(res.content);
+        // A tool call cut before its end (a very long file, an engine limit) never ran: ask to send it again, smaller.
+        if (hasIncompleteCall(res.content) && !nudgedCut && !last && tools.length) {
+          nudgedCut = true;
+          messages.push({ role: "assistant", content: res.content });
+          messages.push({ role: "user", content: "Ton dernier appel d'outil a été coupé avant la fin, il n'a pas été exécuté. Renvoie-le, en le découpant en plusieurs appels plus petits si besoin (un fichier ou quelques modifications par appel)." });
+          continue;
+        }
         // An empty answer mid-task (it happens with CLI engines) is not a conclusion: ask once to go on.
         if (!text.trim() && !carried && !nudgedEmpty && !last && tools.length) {
           nudgedEmpty = true;
