@@ -2,7 +2,7 @@
 // Codex) driven as plain text engines. Every adapter honours the same contract as the Ollama path:
 // stream text, return tool calls and usage, so agents work the same whatever the engine.
 import { spawn } from "node:child_process";
-import { newId, type Provider } from "./db";
+import { getSettings, newId, type Provider } from "./db";
 import { CALL_OPEN, countCalls, lastCallEnd, MAX_CALLS_PER_ANSWER, onlyMoreCalls } from "./toolcalls";
 import type { ChatMessage, StreamResult, ToolCall, ToolDef, Usage } from "./gateway";
 
@@ -243,9 +243,10 @@ function runCli(
   onLine: (line: string) => void,
   control: { stop?: () => void } = {},
   describe?: (lastLines: string[]) => string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env });
     let err = "";
     let buf = "";
     let stopped = false;
@@ -339,6 +340,13 @@ type ClaudeUsage = { input_tokens?: number; cache_creation_input_tokens?: number
 /** Claude Code caches the conversation: the input is mostly in the cache fields, input_tokens alone is only the new part. */
 const contextTokens = (u: ClaudeUsage) => (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
 
+/**
+ * Claude Code may think at length before answering: thinking streams (so the silence guard never fires) but
+ * produces no text, and one call once ran for the whole 15 minutes. Cap the thinking budget of each call,
+ * unless the user set MAX_THINKING_TOKENS themselves.
+ */
+const claudeEnv = (): NodeJS.ProcessEnv => (process.env.MAX_THINKING_TOKENS ? process.env : { ...process.env, MAX_THINKING_TOKENS: String(Number(getSettings().cli_thinking_tokens) || 6000) });
+
 export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
   const type = p.type as ProviderType;
   const system = o.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
@@ -375,7 +383,7 @@ export async function cliChat(p: Provider, o: ChatOpts): Promise<StreamResult> {
         if (u) usage.prompt_tokens = contextTokens(u);
         usage.completion_tokens = u?.output_tokens ?? 0;
       }
-    }, control, () => failure);
+    }, control, () => failure, claudeEnv());
     if (failure && !gate.text) throw new Error(failure);
     if (!gate.text && finalText) gate.push(finalText);
   } else {

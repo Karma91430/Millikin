@@ -10,7 +10,7 @@ export const RIGORS = [
   {
     id: "standard",
     label: "Standard",
-    description: "Un vrai projet sans cérémonie : tâches de taille moyenne, relecture par un agent sur les tâches importantes.",
+    description: "Un vrai projet sans cérémonie : des lots fonctionnels, relecture par un agent sur les grosses tâches (5 points et plus).",
   },
   {
     id: "entreprise",
@@ -38,7 +38,11 @@ export const PLANNING_RIGOR: Record<Rigor, string> = {
 
 /**
  * Who controls a finished task: "auto" = Millikin checks the facts (files written, syntax, commands and
- * tests), "agent" = a first contact reviews it. Standard keeps agent reviews for the bigger tasks.
+ * tests), "agent" = a first contact reviews it. Standard keeps agent reviews for the big tasks (5 points and
+ * more, or not estimated); Entreprise reviews every task.
  */
 export const reviewMode = (rigor: Rigor, complexity: number): "auto" | "agent" =>
-  rigor === "prototype" ? "auto" : rigor === "standard" && complexity > 0 && complexity <= 2 ? "auto" : "agent";
+  rigor === "entreprise" ? "agent" : rigor === "standard" && (complexity >= 5 || complexity <= 0) ? "agent" : "auto";
+
+/** Default task size when planning: lots kept whole, except with the full method. */
+export const defaultGranularity = (rigor: Rigor): "macro" | "standard" => (rigor === "entreprise" ? "standard" : "macro");

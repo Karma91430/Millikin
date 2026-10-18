@@ -4,7 +4,7 @@ import { Blocks, CalendarRange, Check, ChevronDown, ChevronRight, ChevronUp, Cod
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/i18n";
 import { hasModule, PROJECT_MODULES } from "@/lib/modules";
-import { RIGORS, rigorOf, type Rigor } from "@/lib/rigor";
+import { defaultGranularity, RIGORS, rigorOf, type Rigor } from "@/lib/rigor";
 import { layoutOf, specFromTeam, type TeamSpec } from "@/lib/team";
 import type { Trace } from "@/lib/trace";
 import { api, crud, formatBytes, useData, type Agent, type Project, type RunInfo, type Sprint, type Task, type Team } from "../api";
@@ -259,7 +259,8 @@ function NewProject({
   const [members, setMembers] = useState<string[]>([]);
   const [entries, setEntries] = useState<string[]>([]);
   const [modules, setModules] = useState<string[]>(["board", "sprints", "files", "decisions", "stats"]);
-  const [rigor, setRigor] = useState<Rigor>("standard");
+  // Prototype by default: the leanest mode, closest to using the engine alone; raise it for bigger projects.
+  const [rigor, setRigor] = useState<Rigor>("prototype");
   const [dir, setDir] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<"" | "team" | "modules" | "create">("");
@@ -1704,7 +1705,8 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
   const [direct, setDirect] = useState(false);
   const [brief, setBrief] = useState("");
   const [sprints, setSprints] = useState(true);
-  const [granularity, setGranularity] = useState<"macro" | "standard" | "fine">("standard");
+  const rigor = rigorOf(project);
+  const [granularity, setGranularity] = useState<"macro" | "standard" | "fine">(defaultGranularity(rigor));
   const [error, setError] = useState<string>();
   const entries = specFromTeam(project.team).entry_ids.length;
   return (
@@ -1763,16 +1765,20 @@ function PlanModal({ project, onChat, onClose, onStarted }: { project: Project; 
         <Field label={t("Consigne (optionnelle)")}>
           <Textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("ex : priorité au MVP, pas d'interface graphique pour l'instant")} />
         </Field>
-        <Field
-          label={t("Granularité des tâches")}
-          hint={t("Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Le nombre de tâches suit le périmètre.")}
-        >
-          <Select value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
-            <option value="macro">{t("Large : un lot de 1 à 3 jours par tâche")}</option>
-            <option value="standard">{t("Standard : ½ à 1 journée par tâche")}</option>
-            <option value="fine">{t("Fine : tâches de 1 à 3 heures")}</option>
-          </Select>
-        </Field>
+        {rigor === "prototype" ? (
+          <p className="text-xs text-fg-muted">{t("Projet en mode Prototype : quelques tâches orientées livrables, sans découpage plus fin.")}</p>
+        ) : (
+          <Field
+            label={t("Granularité des tâches")}
+            hint={t("Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Plus c'est fin, plus il y a de tâches (et de tokens).")}
+          >
+            <Select value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
+              <option value="macro">{t("Large : un lot de 1 à 3 jours par tâche")}</option>
+              <option value="standard">{t("Standard : ½ à 1 journée par tâche")}</option>
+              <option value="fine">{t("Fine : tâches de 1 à 3 heures")}</option>
+            </Select>
+          </Field>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={sprints} onChange={(e) => setSprints(e.target.checked)} className="accent-[var(--accent)]" />
           {t("Organiser les tâches en sprints")}

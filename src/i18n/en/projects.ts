@@ -219,8 +219,6 @@ export const projects: Record<string, string> = {
   "Consigne (optionnelle)": "Brief (optional)",
   "ex : priorité au MVP, pas d'interface graphique pour l'instant": "e.g. focus on the MVP, no graphical interface for now",
   "Granularité des tâches": "Task granularity",
-  "Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Le nombre de tâches suit le périmètre.":
-    "The first contact first defines the functional work packages, then each package is split to this size. The number of tasks follows the scope.",
   "Large : un lot de 1 à 3 jours par tâche": "Large: a 1 to 3 day package per task",
   "Standard : ½ à 1 journée par tâche": "Standard: ½ to 1 day per task",
   "Fine : tâches de 1 à 3 heures": "Fine: 1 to 3 hour tasks",
@@ -267,6 +265,8 @@ export const projects: Record<string, string> = {
   Standard: "Standard",
   Entreprise: "Enterprise",
   "Le minimum qui marche : peu de tâches, orientées livrables, contrôle automatique sur les faits.": "The minimum that works: few deliverable-oriented tasks, automatic fact-based checks.",
-  "Un vrai projet sans cérémonie : tâches de taille moyenne, relecture par un agent sur les tâches importantes.": "A real project without ceremony: medium-sized tasks, agent review on the important ones.",
+  "Un vrai projet sans cérémonie : des lots fonctionnels, relecture par un agent sur les grosses tâches (5 points et plus).": "A real project without ceremony: functional lots, agent review on the big tasks (5 points and more).",
   "Méthode complète : décisions d'architecture, user stories, recette, relecture de chaque tâche par un agent.": "Full method: architecture decisions, user stories, acceptance testing, agent review of every task.",
+  "Projet en mode Prototype : quelques tâches orientées livrables, sans découpage plus fin.": "Prototype project: a few deliverable-oriented tasks, not split any further.",
+  "Le premier contact définit d'abord les lots fonctionnels, puis chaque lot est découpé à cette taille. Plus c'est fin, plus il y a de tâches (et de tokens).": "The first contact defines the functional lots first, then each lot is split to this size. The finer, the more tasks (and tokens).",
 };
