@@ -45,7 +45,8 @@ export function ProjectPilot({ project, agents, sprintsOn }: { project: Project;
 function SprintReviews({ project, agents }: { project: Project; agents: Map<string, Agent> }) {
   const { t } = useT();
   const data = useData<Sprint[]>("/api/crud/sprints");
-  const sprints = useMemo(() => (data.data ?? []).filter((s) => s.project_id === project.id && s.status !== "planned").reverse(), [data.data, project.id]);
+  // Every sprint, newest first; a planned one can still get an interim review.
+  const sprints = useMemo(() => (data.data ?? []).filter((s) => s.project_id === project.id).reverse(), [data.data, project.id]);
   const [pick, setPick] = useState<string>();
   const [error, setError] = useState<string>();
   const sprint = sprints.find((s) => s.id === pick) ?? sprints.find((s) => s.review) ?? sprints[0];
@@ -59,8 +60,8 @@ function SprintReviews({ project, agents }: { project: Project; agents: Map<stri
   if (!data.data) return <div className="p-6 text-sm text-fg-muted">{data.error ?? t("Chargement…")}</div>;
   if (!sprints.length)
     return (
-      <Empty icon={<ClipboardCheck size={28} />} title={t("Aucun sprint démarré")}>
-        {t("La revue est rédigée par les premiers contacts quand tu clôtures un sprint dans l'onglet Tâches.")}
+      <Empty icon={<ClipboardCheck size={28} />} title={t("Aucun sprint")}>
+        {t("Quand le dernier ticket d'un sprint est validé, le sprint se clôture et les premiers contacts rédigent sa revue.")}
       </Empty>
     );
 
@@ -82,7 +83,7 @@ function SprintReviews({ project, agents }: { project: Project; agents: Map<stri
           <button key={s.id} onClick={() => setPick(s.id)} className={cx("mb-1 w-full rounded-lg px-3 py-2 text-left text-sm", s.id === sprint?.id ? "bg-surface-3" : "hover:bg-surface-2")}>
             <div className="truncate font-medium">{s.name}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-fg-subtle">
-              {s.status === "active" ? t("en cours") : t("clôturé")}
+              {s.status === "active" ? t("en cours") : s.status === "planned" ? t("pas commencé") : t("clôturé")}
               {s.review?.status === "running" && <Loader2 size={11} className="animate-spin text-accent" />}
               {s.review?.status === "done" && <span className="text-emerald-400">· {t("revue prête")}</span>}
               {s.review?.status === "error" && <span className="text-red-400">· {t("revue en erreur")}</span>}
@@ -102,12 +103,12 @@ function SprintReviews({ project, agents }: { project: Project; agents: Map<stri
             </div>
             <Button variant={review ? "soft" : "primary"} disabled={review?.status === "running"} onClick={() => generate(sprint.id)}>
               {review?.status === "running" ? <Loader2 size={14} className="animate-spin" /> : review ? <RefreshCw size={14} /> : <Sparkles size={14} />}
-              {review?.status === "running" ? t("Revue en cours…") : review ? t("Relancer la revue") : sprint.status === "active" ? t("Faire une revue intermédiaire") : t("Lancer la revue")}
+              {review?.status === "running" ? t("Revue en cours…") : review ? t("Relancer la revue") : sprint.status === "done" ? t("Lancer la revue") : t("Faire une revue intermédiaire")}
             </Button>
           </div>
           <ErrorNote>{error ?? (review?.status === "error" ? review.error : undefined)}</ErrorNote>
           {!review ? (
-            <p className="text-sm text-fg-muted">{t("Pas encore de revue pour ce sprint. Elle est lancée automatiquement à la clôture, ou avec le bouton ci-dessus.")}</p>
+            <p className="text-sm text-fg-muted">{t("Pas encore de revue pour ce sprint. Elle démarre d'elle-même quand son dernier ticket est validé, ou avec le bouton ci-dessus.")}</p>
           ) : (
             <div className="flex flex-col gap-5">
               <SprintFigures a={review.analytics} agents={agents} />
