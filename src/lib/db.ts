@@ -117,6 +117,7 @@ const COLUMNS: [string, string, string][] = [
   ["projects", "modules", "TEXT DEFAULT '[]'"],
   ["projects", "owner_id", "TEXT DEFAULT ''"],
   ["usage_logs", "user_id", "TEXT DEFAULT ''"],
+  ["usage_logs", "task_id", "TEXT DEFAULT ''"],
   ["conversations", "user_id", "TEXT DEFAULT ''"],
   ["agents", "rag", "TEXT DEFAULT '{}'"],
 ];
@@ -476,6 +477,11 @@ const g2 = globalThis as unknown as { __millikinUserCtx?: AsyncLocalStorage<{ us
 export const userContext = () => (g2.__millikinUserCtx ??= new AsyncLocalStorage());
 export const currentUserId = () => userContext().getStore()?.userId ?? "";
 
+// The ticket a model call is made for (set by task runs), so each sprint can add up exactly its own tickets.
+const g4 = globalThis as unknown as { __millikinTaskCtx?: AsyncLocalStorage<{ taskId: string }> };
+export const taskContext = () => (g4.__millikinTaskCtx ??= new AsyncLocalStorage());
+export const currentTaskId = () => taskContext().getStore()?.taskId ?? "";
+
 export function logUsage(u: {
   provider: string;
   model: string;
@@ -490,7 +496,7 @@ export function logUsage(u: {
 }) {
   db()
     .prepare(
-      "INSERT INTO usage_logs (ts, provider, model, agent_id, project_id, user_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO usage_logs (ts, provider, model, agent_id, project_id, user_id, task_id, source, prompt_tokens, completion_tokens, latency_ms, status, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(now(), u.provider, u.model, u.agent_id ?? null, u.project_id ?? "", currentUserId(), u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
+    .run(now(), u.provider, u.model, u.agent_id ?? null, u.project_id ?? "", currentUserId(), currentTaskId(), u.source, u.prompt_tokens ?? 0, u.completion_tokens ?? 0, u.latency_ms, u.status, u.error ?? null);
 }

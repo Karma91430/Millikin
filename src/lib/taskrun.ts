@@ -4,7 +4,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendDecision } from "./decisions";
-import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
+import { get, getSettings, list, newId, now, taskContext, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
 import { effectiveModel, isQuotaError, withModelOverride } from "./gateway";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
@@ -231,7 +231,8 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
 
   return startRun(
     { id: newId(), conversationId: `task:${task.id}`, targetType: "task", targetId: project.id, title: task.title, userMessage: task.title },
-    async (emit, signal, run) => {
+    // Every model call of this run is recorded against the ticket.
+    (emit, signal, run) => taskContext().run({ taskId: task.id }, async () => {
       const ctx = {
         workspace: await workspaceFor(project.name, project.path),
         projectId: project.id,
@@ -428,7 +429,7 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
       upsert("tasks", { id: t.id, trace: run.trace });
       if (t.status === "done") closeSprintIfDone(t);
       emit({ type: "done", messageId: "" });
-    },
+    }),
   );
 }
 
