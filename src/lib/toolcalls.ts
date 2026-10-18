@@ -7,9 +7,10 @@ import { newId } from "./db";
 export type TextToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 
 /** Where a call starts (to hide raw calls from the screen) and how one ends (to stop runaway generations). */
-export const CALL_OPEN = /<(?:tool_call|get_tool_call|tool_use|function_calls|invoke\s)/;
-const CALL_CLOSE = /<\/(?:tool_call|get_tool_call|tool_use|invoke|function_calls)>/g;
-const JSON_BLOCK = /<(tool_call|get_tool_call|tool_use)>\s*(\{[\s\S]*?\})\s*(?:<\/\1>|$)/g;
+// Models also invent their own tag names (<get_file>, <call>…): any tag whose content starts as {"name": … is a call.
+export const CALL_OPEN = /<(?:tool_call|get_tool_call|tool_use|function_calls|invoke\s)|<[a-z_][\w-]*>\s*\{\s*"name"\s*:/;
+const CALL_CLOSE = /<\/(?:tool_call|get_tool_call|tool_use|invoke|function_calls)>|\}\s*<\/[a-z_][\w-]*>/g;
+const JSON_BLOCK = /<([a-z_][\w-]*)>\s*(\{\s*"name"\s*:[\s\S]*?\})\s*(?:<\/\1>|$)/g;
 const INVOKE_BLOCK = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)(?:<\/invoke>|$)/g;
 const PARAM = /<parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/parameter>/g;
 

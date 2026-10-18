@@ -11,7 +11,7 @@ import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
 import { isIgnoredEntry, projectMap } from "./projectmap";
 import { reviewMode, rigorOf } from "./rigor";
-import { syntaxError, workspaceFor } from "./tools";
+import { runProjectChecks, syntaxError, workspaceFor } from "./tools";
 
 const BOARD_WRITE = ["board_add_card", "board_update_card"];
 const DEP_RESULT_CHARS = 1200;
@@ -152,9 +152,9 @@ const CODE_FILE = /\.(py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|rb|php|sh)$/;
 const NOT_DONE = /(n'est pas termin[ée]e|non termin[ée]e|pas encore termin[ée]e?|je ne demande pas (?:encore )?la relecture)/i;
 
 /**
- * Factual control without a model, for small tasks or prototypes: something was produced, files parse,
- * the last run of each test or lint command passed, code was executed at least once, and the report does
- * not say the work is unfinished. Returns the blocking problems (none = validated).
+ * Factual control without a model, for small tasks or prototypes: something was produced, files parse, the
+ * report does not say the work is unfinished, and when code was written Millikin runs the project's tests
+ * itself (whatever tools the assignee has). Returns the blocking problems (none = validated).
  */
 async function autoCheck(written: Set<string>, commands: Actions["commands"], workspace: string, report: string) {
   const issues: string[] = [];
@@ -165,14 +165,10 @@ async function autoCheck(written: Set<string>, commands: Actions["commands"], wo
     const err = await syntaxError(path.join(workspace, f), content);
     if (err) issues.push(`erreur de syntaxe dans ${f} : ${err.split("\n").pop()}`);
   }
-  const lastByTool = new Map<string, { command: string; code: number }>();
-  for (const c of commands) {
-    const tool = testToolOf(c.command);
-    const code = Number(c.result.match(/code de sortie : (\d+)/)?.[1] ?? 0);
-    if (tool) lastByTool.set(tool, { command: c.command, code });
+  if ([...written].some((f) => CODE_FILE.test(f))) {
+    const run = await runProjectChecks(workspace);
+    if (run && run.code !== 0) issues.push(`les tests du projet échouent (${run.command}, code ${run.code}) :\n${run.output.slice(-1200)}`);
   }
-  for (const [, c] of lastByTool) if (c.code !== 0) issues.push(`la dernière exécution de « ${c.command.slice(0, 120)} » a échoué (code ${c.code})`);
-  if ([...written].some((f) => CODE_FILE.test(f)) && !commands.length) issues.push("du code a été écrit mais rien n'a été exécuté (ni test, ni lancement)");
   if (NOT_DONE.test(report)) issues.push("le compte rendu indique que la tâche n'est pas terminée");
   return issues;
 }
@@ -251,6 +247,7 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
       const launchCommands: Actions["commands"] = [];
       // Agent review needs another first contact than the assignee; without one, Millikin checks the facts itself.
       const mode = reviewer ? reviewMode(rigorOf(project), t.complexity || 0) : "auto";
+      let stuck = "";
 
       // Loop: work → review; a rejected or failed attempt is relaunched with the feedback, up to maxRetries times.
       for (let attempt = 0; ; attempt++) {
@@ -316,6 +313,7 @@ Remarques : 3 points au plus`;
 
           // Small tasks and prototypes: Millikin checks the facts itself, no model call.
           if (mode === "auto") {
+            const before = t.evaluation?.verdict === "a_corriger" ? t.evaluation.comment : "";
             const issues = await autoCheck(launchWritten, launchCommands, ctx.workspace, result);
             const evaluation: Evaluation = issues.length
               ? { verdict: "a_corriger", score: 2, comment: `Contrôle automatique : ${issues.join(" ; ")}.`, by: "Millikin", at: now() }
@@ -327,6 +325,10 @@ Remarques : 3 points au plus`;
               ...(evaluation.verdict === "valide" ? { digest: digestOf(launchWritten, launchCommands, result) } : {}),
               notes: note(t, "Millikin", `${evaluation.verdict === "valide" ? "✅ Validé" : "↩️ À corriger"} (${evaluation.score}/5) : ${evaluation.comment}`),
             });
+            // The same blocking problem twice in a row: another relaunch would end the same way.
+            // (numbers are ignored: test durations and line numbers change from one run to the next)
+            const same = (x: string) => x.replace(/\d+([.,]\d+)?/g, "#");
+            if (evaluation.verdict === "a_corriger" && before && same(before) === same(evaluation.comment)) stuck = evaluation.comment;
           }
 
           const facts = mode === "auto" ? "" : await factsFor(actions, ctx.workspace, t, result);
@@ -405,6 +407,10 @@ Donne un avis court et argumenté, puis termine OBLIGATOIREMENT par une ligne JS
         }
 
         if (t.status !== "retry" || signal.aborted) break;
+        if (stuck) {
+          t = upsert<Task>("tasks", { id: t.id, needs_human: true, notes: note(t, "Millikin", "🧑 Le même blocage revient deux fois de suite : les relances s'arrêtent, une vérification humaine est nécessaire.") });
+          break;
+        }
         if (attempt >= maxRetries) {
           if (maxRetries > 0)
             t = upsert<Task>("tasks", {
