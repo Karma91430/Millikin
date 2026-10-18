@@ -111,4 +111,67 @@ Un fichier inexistant donne un message d'erreur et le code de sortie 1. Ajouter 
       { name: "tests présents", run: "ls tests/test_*.py test_*.py 2>/dev/null | grep -q ." },
     ],
   },
+  {
+    id: "library",
+    name: "Gestion de bibliothèque (projet moyen)",
+    summary: "Un paquet Python complet : modèle, persistance JSON, règles d'emprunt, recherche, statistiques, CLI et tests.",
+    brief: `Construire une petite application Python sans dépendance de gestion de bibliothèque, dans un paquet biblio/ à la racine du projet.
+
+API attendue (exactement ces noms), dans biblio/store.py : une classe Bibliotheque(chemin_json) qui charge le fichier s'il existe et le réécrit après chaque modification.
+- ajouter_livre(isbn, titre, auteur, annee, exemplaires=1) : ValueError si l'isbn est vide ou existe déjà.
+- inscrire_membre(nom) : retourne l'identifiant du membre (entier, à partir de 1).
+- emprunter(isbn, membre_id) : ValueError si le livre ou le membre est inconnu, s'il ne reste aucun exemplaire, ou si le membre a déjà 3 emprunts en cours.
+- rendre(isbn, membre_id) : ValueError si cet emprunt n'existe pas.
+- disponibles(isbn) : nombre d'exemplaires disponibles.
+- emprunts_de(membre_id) : liste des isbn empruntés par le membre.
+- rechercher(texte) : liste des isbn dont le titre ou l'auteur contient le texte, sans tenir compte de la casse ni des accents, triée par titre.
+- statistiques() : dictionnaire {"livres": nombre de titres, "exemplaires": total des exemplaires, "empruntes": emprunts en cours, "top_auteur": auteur qui a le plus de titres}.
+
+Ligne de commande : python3 -m biblio --data FICHIER.json COMMANDE
+- ajouter ISBN "Titre" "Auteur" ANNEE [EXEMPLAIRES]
+- membre "Nom" : affiche l'identifiant créé
+- emprunter ISBN ID et rendre ISBN ID
+- chercher TEXTE : une ligne par livre au format « ISBN | Titre | Auteur | disponibles/total »
+- stats : affiche statistiques() en JSON
+Toute erreur affiche un message sur la sortie d'erreur et termine avec le code 2.
+
+Ajouter des tests (dossier tests/) et un README.`,
+    leads: ["Tech lead"],
+    builders: ["Développeur full-stack", "Ingénieur QA"],
+    checks: [
+      { name: "paquet biblio importable", run: py(`from biblio.store import Bibliotheque\nprint("ok")`) },
+      {
+        name: "ajout et doublon refusé",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\nb = Bibliotheque(os.path.join(tempfile.mkdtemp(), "d.json"))\nb.ajouter_livre("1", "Dune", "Herbert", 1965, 2)\nfor bad in (("1", "X", "Y", 2000), ("", "X", "Y", 2000)):\n    try:\n        b.ajouter_livre(*bad)\n    except ValueError:\n        continue\n    raise SystemExit(f"pas de ValueError pour {bad}")\nprint("ok")`),
+      },
+      {
+        name: "emprunt, retour et disponibilités",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\nb = Bibliotheque(os.path.join(tempfile.mkdtemp(), "d.json"))\nb.ajouter_livre("1", "Dune", "Herbert", 1965, 2)\nm = b.inscrire_membre("Ana")\nassert m == 1, m\nb.emprunter("1", m)\nassert b.disponibles("1") == 1\nassert b.emprunts_de(m) == ["1"]\nb.rendre("1", m)\nassert b.disponibles("1") == 2 and b.emprunts_de(m) == []\ntry:\n    b.rendre("1", m)\nexcept ValueError:\n    print("ok")\nelse:\n    raise SystemExit("rendre sans emprunt doit lever ValueError")`),
+      },
+      {
+        name: "règles : stock épuisé et 3 emprunts maximum",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\nb = Bibliotheque(os.path.join(tempfile.mkdtemp(), "d.json"))\nfor i in range(1, 6):\n    b.ajouter_livre(str(i), f"Livre {i}", "A", 2000, 1)\nm1 = b.inscrire_membre("Ana"); m2 = b.inscrire_membre("Bo")\nb.emprunter("1", m1)\ntry:\n    b.emprunter("1", m2)\nexcept ValueError:\n    pass\nelse:\n    raise SystemExit("stock épuisé non détecté")\nb.emprunter("2", m1); b.emprunter("3", m1)\ntry:\n    b.emprunter("4", m1)\nexcept ValueError:\n    print("ok")\nelse:\n    raise SystemExit("4e emprunt accepté")`),
+      },
+      {
+        name: "persistance JSON entre deux instances",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\np = os.path.join(tempfile.mkdtemp(), "d.json")\nb = Bibliotheque(p)\nb.ajouter_livre("9", "Fondation", "Asimov", 1951, 3)\nm = b.inscrire_membre("Ana")\nb.emprunter("9", m)\nc = Bibliotheque(p)\nassert c.disponibles("9") == 2 and c.emprunts_de(m) == ["9"]\nprint("ok")`),
+      },
+      {
+        name: "recherche sans casse ni accents, triée par titre",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\nb = Bibliotheque(os.path.join(tempfile.mkdtemp(), "d.json"))\nb.ajouter_livre("a", "Zéro et l'infini", "Koestler", 1940)\nb.ajouter_livre("b", "Les Misérables", "Hugo", 1862)\nb.ajouter_livre("c", "Notre-Dame", "Victor Hugo", 1831)\nassert b.rechercher("hugo") == ["b", "c"], b.rechercher("hugo")\nassert b.rechercher("ZERO") == ["a"], b.rechercher("ZERO")\nassert b.rechercher("miserables") == ["b"]\nprint("ok")`),
+      },
+      {
+        name: "statistiques",
+        run: py(`import tempfile, os\nfrom biblio.store import Bibliotheque\nb = Bibliotheque(os.path.join(tempfile.mkdtemp(), "d.json"))\nb.ajouter_livre("1", "A", "Hugo", 1, 2)\nb.ajouter_livre("2", "B", "Hugo", 1, 1)\nb.ajouter_livre("3", "C", "Zola", 1, 4)\nm = b.inscrire_membre("Ana")\nb.emprunter("3", m)\ns = b.statistiques()\nassert s == {"livres": 3, "exemplaires": 7, "empruntes": 1, "top_auteur": "Hugo"}, s\nprint("ok")`),
+      },
+      {
+        name: "ligne de commande : ajout, membre, emprunt, recherche, stats",
+        scratch: true,
+        run: `cd "$PROJECT" && D=$(mktemp -d)/d.json && python3 -m biblio --data "$D" ajouter 42 "Dune" "Herbert" 1965 1 >/dev/null && python3 -m biblio --data "$D" membre "Ana" | grep -q 1 && python3 -m biblio --data "$D" emprunter 42 1 >/dev/null && python3 -m biblio --data "$D" chercher dune && python3 -m biblio --data "$D" stats`,
+        expect: { includes: ["42 | Dune | Herbert | 0/1", '"empruntes": 1'] },
+      },
+      { name: "ligne de commande : erreur → code 2", scratch: true, run: `cd "$PROJECT" && D=$(mktemp -d)/d.json && python3 -m biblio --data "$D" emprunter 404 1 2>/dev/null; test $? -eq 2` },
+      { name: "tests présents", run: "ls tests/test_*.py 2>/dev/null | grep -q ." },
+    ],
+  },
 ];

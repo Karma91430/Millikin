@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendDecision } from "./decisions";
 import { get, getSettings, list, newId, now, upsert, type Agent, type Evaluation, type Project, type Task } from "./db";
-import { isQuotaError } from "./gateway";
+import { effectiveModel, isQuotaError, withModelOverride } from "./gateway";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, getRun, startRun, stopRun, type Run } from "./runs";
 import type { TraceEvent } from "./trace";
@@ -50,18 +50,22 @@ const taskSteps = () => Math.max(Number(getSettings().task_max_steps) || 24, Num
 const projectTasks = (projectId: string) => list<Task>("tasks").filter((t) => t.project_id === projectId);
 
 /** What an attempt really did, recorded from its tool events (the report is the agent's claim, this is the fact). */
-type Actions = { written: Set<string>; failedEdits: number; commands: { command: string; result: string }[] };
+type Actions = { written: Set<string>; read: Set<string>; failedEdits: number; commands: { command: string; result: string }[] };
 function recorder(emit: (ev: TraceEvent) => void) {
-  const actions: Actions = { written: new Set(), failedEdits: 0, commands: [] };
+  const actions: Actions = { written: new Set(), read: new Set(), failedEdits: 0, commands: [] };
   const pending = new Map<string, { name: string; args: Record<string, unknown> }>();
   const tap = (ev: TraceEvent) => {
     if (ev.type === "tool_call") pending.set(ev.toolCallId, { name: ev.name, args: (typeof ev.args === "string" ? safeJson(ev.args) : ev.args) as Record<string, unknown> });
     if (ev.type === "tool_result") {
       const call = pending.get(ev.toolCallId);
-      const m = ev.result.match(/^Fichier (?:écrit|modifié) : (\S+)/);
-      if (m) actions.written.add(m[1]);
-      else if (call?.name === "edit_file" && ev.result.startsWith("Échec")) actions.failedEdits++;
+      // write_file / edit_file / edit_files report one line per file.
+      for (const m of ev.result.matchAll(/^Fichier (?:écrit|modifié) : (\S+)/gm)) actions.written.add(m[1]);
+      if ((call?.name === "edit_file" || call?.name === "edit_files") && /^Échec/m.test(ev.result)) actions.failedEdits += (ev.result.match(/^Échec/gm) ?? []).length;
+      if (call?.name === "read_file" && call.args?.path) actions.read.add(String(call.args.path));
+      if (call?.name === "read_files" && Array.isArray(call.args?.paths)) for (const f of call.args.paths as unknown[]) actions.read.add(String(f));
       if (call?.name === "run_command") actions.commands.push({ command: String(call.args?.command ?? ""), result: ev.result.slice(-1500) });
+      // run_checks starts its result with the command it chose.
+      if (call?.name === "run_checks" && ev.result.startsWith("$ ")) actions.commands.push({ command: ev.result.split("\n")[0].slice(2), result: ev.result.slice(-1500) });
     }
     emit(ev);
   };
@@ -265,11 +269,17 @@ export function startTaskRun(taskId: string, opts: { ignoreBlockers?: boolean } 
 
 Réalise cette tâche maintenant. Si elle implique du code ou des documents, écris réellement les fichiers dans le dossier du projet.
 Priorité : d'abord chaque livrable et critère d'acceptation demandé (fichiers écrits, tests lancés), ensuite seulement les améliorations au-delà de la consigne.
+Économise les allers-retours : lis plusieurs fichiers d'un coup (read_files), regroupe tes modifications (edit_files), mets plusieurs appels d'outils indépendants dans la même réponse, et vérifie avec run_checks.
 Termine par un compte rendu COURT (10 lignes au plus), sous cette forme :
 Fichiers : chemins créés ou modifiés
 Commandes : commandes lancées et leur résultat (code de sortie, tests passés)
 Statut : terminé, ou ce qui reste à faire
 Remarques : 3 points au plus`;
+
+        // A relaunch after a rejection or a failure can go to a stronger model (setting), not the same one again.
+        const escalation = getSettings().escalation_model;
+        const escalate = attempt > 0 && !carryOver && !!escalation && (t.evaluation?.verdict === "a_corriger" || !!lastError) && escalation !== effectiveModel(assignee.id, assignee.model);
+        if (escalate) t = upsert<Task>("tasks", { id: t.id, notes: note(t, "Millikin", `⤴ Relance confiée au modèle de secours : ${escalation}.`) });
 
         try {
           lastError = "";
@@ -277,7 +287,7 @@ Remarques : 3 points au plus`;
           const { actions, tap } = recorder(emit);
           let stepLimit = false;
           carryOver = "";
-          const result = await runAgent({
+          const work = () => runAgent({
             agent: assignee,
             input,
             team,
@@ -291,6 +301,7 @@ Remarques : 3 points au plus`;
             maxSteps: taskSteps(),
             onStepLimit: () => (stepLimit = true),
           });
+          const result = escalate ? await withModelOverride({ byAgent: { [assignee.id]: escalation } }, work) : await work();
           for (const f of actions.written) launchWritten.add(f);
           launchCommands.push(...actions.commands);
           // Out of steps: a review would only say "unfinished". Continue directly (twice at most per launch).

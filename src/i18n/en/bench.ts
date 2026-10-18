@@ -42,4 +42,6 @@ export const bench: Record<string, string> = {
     "The scenario is handed directly to the engine's own agent (its CLI, its tools), without Millikin: the yardstick to measure the platform's overhead.",
   "Choisir un modèle Claude Code ou Codex": "Pick a Claude Code or Codex model",
   "moteur seul : {m}": "engine alone: {m}",
+  "Gestion de bibliothèque (projet moyen)": "Library management (medium project)",
+  "Un paquet Python complet : modèle, persistance JSON, règles d'emprunt, recherche, statistiques, CLI et tests.": "A complete Python package: model, JSON persistence, lending rules, search, statistics, CLI and tests.",
 };

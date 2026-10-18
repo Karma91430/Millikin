@@ -134,7 +134,11 @@ export const isQuotaError = (message: string) =>
 type ModelOverride = { byAgent: Record<string, string>; fallback?: string };
 const g3 = globalThis as unknown as { __millikinModelOverride?: AsyncLocalStorage<ModelOverride> };
 const overrides = () => (g3.__millikinModelOverride ??= new AsyncLocalStorage());
-export const withModelOverride = <T>(o: ModelOverride, fn: () => Promise<T>) => overrides().run(o, fn);
+/** Inside an outer override (a bench run), the inner one adds to it. */
+export const withModelOverride = <T>(o: ModelOverride, fn: () => Promise<T>) => {
+  const parent = overrides().getStore();
+  return overrides().run(parent ? { byAgent: { ...parent.byAgent, ...o.byAgent }, fallback: o.fallback ?? parent.fallback } : o, fn);
+};
 /** The model an agent really uses: its own, unless a bench run forces another one. */
 export function effectiveModel(agentId: string | null | undefined, ref: string | null | undefined) {
   const o = overrides().getStore();
