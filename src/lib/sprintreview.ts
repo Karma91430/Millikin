@@ -1,6 +1,7 @@
 // Sprint review: figures computed when a sprint is closed, then feedback from each first contact and a
 // synthesis by the main one. Runs in the background like a ticket, so it shows up live and in the traces.
-import { db, get, list, newId, now, upsert, type Agent, type Project, type Sprint, type SprintAnalytics, type SprintReview, type Task } from "./db";
+import { db, get, list, newId, now, taskContext, upsert, type Agent, type Project, type Sprint, type SprintAnalytics, type SprintReview, type Task } from "./db";
+import type { Trace } from "./trace";
 import { runAgent, teamRuntime } from "./orchestrator";
 import { activeRunFor, startRun, type Run } from "./runs";
 import { workspaceFor } from "./tools";
@@ -17,12 +18,7 @@ export function sprintAnalytics(sprint: Sprint & { created_at?: number }): Sprin
   const points = (ts: Task[]) => ts.reduce((n, t) => n + (t.complexity || 0), 0);
   const avg = (ts: Task[]) => (ts.length ? ts.reduce((n, t) => n + (t.evaluation?.score ?? 0), 0) / ts.length : null);
   const from = (sprint.start_date ? Date.parse(sprint.start_date) : NaN) || sprint.created_at || now() - 14 * DAY;
-  const usage = db()
-    .prepare(
-      `SELECT agent_id, COUNT(*) AS calls, SUM(status = 'error') AS errors, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens, COALESCE(SUM(latency_ms), 0) AS ms
-       FROM usage_logs WHERE project_id = ? AND ts >= ? GROUP BY agent_id`,
-    )
-    .all(sprint.project_id, from) as { agent_id: string | null; calls: number; errors: number; tokens: number; ms: number }[];
+  const usage = sprintUsage(tasks);
   const use = (id: string) => usage.find((u) => u.agent_id === id);
   const memberIds = [...new Set([...tasks.map((t) => t.assignee_id).filter(Boolean), ...usage.map((u) => u.agent_id).filter((x): x is string => !!x)])];
   return {
@@ -57,6 +53,44 @@ export function sprintAnalytics(sprint: Sprint & { created_at?: number }): Sprin
     carried: tasks.filter((t) => t.status !== "done").map((t) => ({ id: t.id, title: t.title, status: t.status, assignee_id: t.assignee_id })),
     delivered: done.map((t) => ({ id: t.id, title: t.title, assignee_id: t.assignee_id, score: t.evaluation?.score ?? null, points: t.complexity || 0 })),
   };
+}
+
+type AgentUsage = { agent_id: string; calls: number; errors: number; tokens: number; ms: number };
+
+/**
+ * Model usage of exactly the sprint's tickets, per agent: from the usage log when calls are tagged with their
+ * ticket, otherwise rebuilt from the ticket's trace (tokens and time of each model step). Planning and reviews
+ * are not counted.
+ */
+function sprintUsage(tasks: Task[]): AgentUsage[] {
+  const byAgent = new Map<string, AgentUsage>();
+  const add = (agent: string, calls: number, errors: number, tokens: number, ms: number) => {
+    const u = byAgent.get(agent) ?? { agent_id: agent, calls: 0, errors: 0, tokens: 0, ms: 0 };
+    u.calls += calls;
+    u.errors += errors;
+    u.tokens += tokens;
+    u.ms += ms;
+    byAgent.set(agent, u);
+  };
+  const ids = tasks.map((t) => t.id);
+  const logged = ids.length
+    ? (db()
+        .prepare(
+          `SELECT task_id, agent_id, COUNT(*) AS calls, SUM(status = 'error') AS errors, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens, COALESCE(SUM(latency_ms), 0) AS ms
+           FROM usage_logs WHERE task_id IN (${ids.map(() => "?").join(",")}) GROUP BY task_id, agent_id`,
+        )
+        .all(...ids) as (AgentUsage & { task_id: string })[])
+    : [];
+  for (const r of logged) add(r.agent_id ?? "", r.calls, r.errors || 0, r.tokens, r.ms);
+  const withLogs = new Set(logged.map((r) => r.task_id));
+  for (const t of tasks.filter((x) => !withLogs.has(x.id))) {
+    const trace = t.trace as Trace | null;
+    for (const c of Object.values(trace?.calls ?? {})) {
+      const steps = c.llm ?? [];
+      add(c.agentId, steps.length, c.status === "error" ? 1 : 0, steps.reduce((n, s) => n + s.promptTokens + s.completionTokens, 0), steps.reduce((n, s) => n + s.ms, 0));
+    }
+  }
+  return [...byAgent.values()];
 }
 
 /** The figures as text for the reviewers. */
@@ -114,7 +148,8 @@ export function closeSprintIfDone(task: Task): boolean {
   const analytics = sprintAnalytics(sprint);
   upsert("sprints", { id: sprint.id, status: "done", start_date: sprint.start_date || today(), end_date: sprint.end_date || today() });
   try {
-    startSprintReview(sprint.id, analytics);
+    // Called from the last ticket's run: the review's own model calls must not count against that ticket.
+    taskContext().exit(() => startSprintReview(sprint.id, analytics));
   } catch {
     // No first contact or a review already running: the sprint stays closed, the review can be run from Pilotage.
   }
