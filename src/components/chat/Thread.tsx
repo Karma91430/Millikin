@@ -12,9 +12,13 @@ const TOOL_ICON: Record<string, string> = {
   fetch_url: "🌐",
   list_files: "📁",
   read_file: "📄",
+  read_files: "📄",
   write_file: "✍️",
   edit_file: "✏️",
+  edit_files: "✏️",
   run_command: "⌨️",
+  run_checks: "✅",
+  use_skill: "🎓",
   board_list: "📋",
   board_add_card: "📋",
   board_update_card: "📋",
@@ -23,7 +27,9 @@ const TOOL_ICON: Record<string, string> = {
 
 function argSummary(t: ToolUse) {
   const a = (t.args ?? {}) as Record<string, unknown>;
-  const v = a.query ?? a.url ?? a.path ?? a.command ?? a.title ?? a.id ?? Object.values(a)[0];
+  if (Array.isArray(a.paths)) return (a.paths as unknown[]).join(", ");
+  if (Array.isArray(a.edits)) return [...new Set((a.edits as { path?: string }[]).map((e) => e.path))].join(", ");
+  const v = a.query ?? a.url ?? a.path ?? a.command ?? a.title ?? a.name ?? a.id ?? Object.values(a)[0];
   return typeof v === "string" ? v : v ? JSON.stringify(v) : "";
 }
 

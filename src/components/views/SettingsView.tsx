@@ -88,6 +88,18 @@ function SettingsForm({ meta, initial }: { meta: Meta; initial: Record<string, s
           <Field label={t("Étapes max pour un ticket")} hint={t("Allers-retours outil → modèle pour une tentative de ticket : écrire, exécuter et corriger demande plus d'étapes qu'une réponse.")}>
             <Input type="number" min={4} max={40} value={v.task_max_steps} onChange={(e) => set("task_max_steps", e.target.value)} />
           </Field>
+          <Field label={t("Modèle de secours pour les relances")} hint={t("Une tâche rejetée ou en échec est relancée avec ce modèle (plus puissant) plutôt qu'avec le même. Vide = le modèle de l'agent.")}>
+            <Select value={v.escalation_model ?? ""} onChange={(e) => set("escalation_model", e.target.value)}>
+              <option value="">{t("Le modèle de l'agent")}</option>
+              {meta.models
+                .filter((m) => m.kind !== "embedding")
+                .map((m) => (
+                  <option key={m.ref} value={m.ref}>
+                    {m.label} ({m.ref.split("/")[0]})
+                  </option>
+                ))}
+            </Select>
+          </Field>
           <Field label={t("Relances automatiques d'une tâche")} hint={t("Une tâche rejetée par le contrôle ou en échec est relancée avec le retour, jusqu'à ce nombre de fois, avant de demander une vérification humaine. 0 = désactivé.")}>
             <Input type="number" min={0} max={10} value={v.task_auto_retries} onChange={(e) => set("task_auto_retries", e.target.value)} />
           </Field>

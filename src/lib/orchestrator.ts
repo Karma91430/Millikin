@@ -50,7 +50,7 @@ const PHASE_EXECUTION = `## Phase de réalisation (validée par l'utilisateur)
 5. Termine par un compte rendu : ce qui est fait, ce que tu as contrôlé, ce qui reste à faire ou à décider.`;
 
 const FILE_RULES = `## Organisation des fichiers
-Tes outils fichiers agissent dans le dossier du projet (chemins relatifs). Commence par list_files pour voir l'existant.
+Tes outils fichiers agissent dans le dossier du projet (chemins relatifs). Appuie-toi sur la carte du projet quand elle t'est donnée ; sinon commence par list_files pour voir l'existant.
 Range les fichiers dans une arborescence claire (src/, tests/, docs/, config/…) et donne-leur des noms explicites
 (snake_case pour Python, kebab-case sinon). Un fichier par responsabilité. N'utilise jamais de noms génériques (test.py, file1.txt, output.md).`;
 

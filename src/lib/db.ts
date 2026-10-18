@@ -213,6 +213,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   workspace_dir: path.join(process.cwd(), "workspace"),
   command_timeout: "60",
   max_reasoning: "12000",
+  /** Model for a task relaunched after a rejection or a failure ("" = the assignee's own model). */
+  escalation_model: "",
   web_fallback: "on",
   /** Interface and agents' answer language: fr | en. */
   language: "fr",

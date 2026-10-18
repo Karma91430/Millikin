@@ -140,6 +140,65 @@ function resolveCards(refs: unknown, projectId: string): string[] {
 }
 const STATUSES = ["todo", "retry", "doing", "review", "done"];
 
+/** Lines of a file from `start`, within `budget` characters; the range is announced when it is not the whole file. */
+async function readChunked(file: string, start: number, budget: number) {
+  const lines = (await fs.readFile(file, "utf8")).split("\n");
+  const from = Math.min(Math.max(1, Math.floor(start)), Math.max(1, lines.length));
+  let end = from - 1;
+  let size = 0;
+  while (end < lines.length && (end === from - 1 || size + lines[end].length + 1 <= budget)) size += lines[end++].length + 1;
+  const body = lines.slice(from - 1, end).join("\n");
+  if (from === 1 && end >= lines.length) return body;
+  return `${body}\n… [lignes ${from} à ${end} sur ${lines.length}${end < lines.length ? ` : lis la suite avec read_file start_line=${end + 1}` : ""}]`;
+}
+
+/** Replace one exact passage (tolerating a different indentation), then check the file. */
+async function editOne(workspace: string, file: unknown, oldArg: unknown, newArg: unknown): Promise<string> {
+  if (!file) return "Échec : chemin manquant (paramètre path).";
+  if (!oldArg) return "Échec : old_text manquant. Pour réécrire tout le fichier, utilise write_file avec le contenu complet.";
+  const p = await inside(workspace, String(file));
+  const text = await fs.readFile(p, "utf8");
+  const oldText = String(oldArg);
+  const newText = String(newArg ?? "");
+  const n = text.split(oldText).length - 1;
+  if (n === 1) {
+    const updated = text.replace(oldText, newText);
+    await fs.writeFile(p, updated, "utf8");
+    return `Fichier modifié : ${path.relative(workspace, p)}${await afterWrite(p, updated, text)}`;
+  }
+  // Small models rarely copy indentation exactly: retry on lines compared without surrounding spaces.
+  if (n === 0) {
+    const lines = text.split("\n");
+    const want = oldText.split("\n").map((l) => l.trim());
+    while (want.length && !want[want.length - 1]) want.pop();
+    const hits: number[] = [];
+    for (let i = 0; want.length && i + want.length <= lines.length; i++) if (want.every((w, k) => lines[i + k].trim() === w)) hits.push(i);
+    if (hits.length === 1) {
+      lines.splice(hits[0], want.length, ...newText.split("\n"));
+      await fs.writeFile(p, lines.join("\n"), "utf8");
+      return `Fichier modifié : ${path.relative(workspace, p)} (passage retrouvé malgré une indentation différente)${await afterWrite(p, lines.join("\n"), text)}`;
+    }
+  }
+  return `Échec (${path.relative(workspace, p)}) : le passage apparaît ${n} fois (il doit être unique et copié à l'identique depuis read_file). Relis le fichier, ou réécris-le entièrement avec write_file.`;
+}
+
+/**
+ * The project's own check command, chosen from its files: npm test, make test, pytest (from the project's
+ * virtualenv when there is one) or unittest. Returned so the run shows exactly what was executed.
+ */
+async function checkCommand(workspace: string): Promise<string | null> {
+  const has = (f: string) => fs.stat(path.join(workspace, f)).then(() => true, () => false);
+  const pkg = await fs.readFile(path.join(workspace, "package.json"), "utf8").catch(() => "");
+  if (pkg && /"test"\s*:/.test(pkg)) return "npm test --silent";
+  if (/^test:/m.test(await fs.readFile(path.join(workspace, "Makefile"), "utf8").catch(() => ""))) return "make test";
+  const venv = (await has(".venv/bin/python")) ? ".venv/bin/python" : (await has("venv/bin/python")) ? "venv/bin/python" : "python3";
+  const pyProject = (await has("pyproject.toml")) || (await has("tests")) || (await has("setup.py")) || (await has("requirements.txt"));
+  if (!pyProject && !(await fs.readdir(workspace).catch(() => [] as string[])).some((f) => f.endsWith(".py"))) return null;
+  // Probe through the same login shell as run_command: the PATH (and so the python3) must be the one the run will use.
+  const pytest = await new Promise<boolean>((resolve) => execFile("/bin/zsh", ["-lc", `${venv} -c "import pytest"`], { cwd: workspace, timeout: 15_000 }, (err) => resolve(!err)));
+  return pytest ? `${venv} -m pytest -q` : `${venv} -m unittest discover -q`;
+}
+
 export const TOOL_GROUPS: Group[] = [
   {
     id: "web_search",
@@ -201,18 +260,29 @@ export const TOOL_GROUPS: Group[] = [
           { path: str("chemin relatif"), start_line: { type: "integer", description: "première ligne à lire (1 par défaut)" } },
           ["path"],
         ),
+        async (a) => readChunked(await inside(ctx.workspace, String(a.path ?? "")), Number(a.start_line) || 1, readChunk(ctx.agent)),
+      ],
+      [
+        fn(
+          "read_files",
+          "Lire plusieurs fichiers en un seul appel (préférable à plusieurs read_file).",
+          { paths: { type: "array", items: { type: "string" }, description: "chemins relatifs" } },
+          ["paths"],
+        ),
         async (a) => {
-          const p = await inside(ctx.workspace, String(a.path ?? ""));
-          const lines = (await fs.readFile(p, "utf8")).split("\n");
-          const start = Math.min(Math.max(1, Math.floor(Number(a.start_line) || 1)), Math.max(1, lines.length));
-          // A chunk that fits in a tool result; the end is always announced, so a partial view is never mistaken for the whole file.
-          const chunk = readChunk(ctx.agent);
-          let end = start - 1;
-          let size = 0;
-          while (end < lines.length && (end === start - 1 || size + lines[end].length + 1 <= chunk)) size += lines[end++].length + 1;
-          const body = lines.slice(start - 1, end).join("\n");
-          if (start === 1 && end >= lines.length) return body;
-          return `${body}\n… [lignes ${start} à ${end} sur ${lines.length}${end < lines.length ? ` : lis la suite avec read_file start_line=${end + 1}` : ""}]`;
+          const paths = (Array.isArray(a.paths) ? a.paths : String(a.paths ?? "").split(",")).map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
+          if (!paths.length) return "Échec : aucun chemin (paramètre paths).";
+          // The engine's budget is shared between the files; each one says how to read its rest.
+          const each = Math.max(1500, Math.floor((readChunk(ctx.agent) * 1.1) / paths.length));
+          const parts: string[] = [];
+          for (const f of paths) {
+            try {
+              parts.push(`=== ${f} ===\n${await readChunked(await inside(ctx.workspace, f), 1, each)}`);
+            } catch (e) {
+              parts.push(`=== ${f} ===\nÉchec : ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+          return parts.join("\n\n");
         },
       ],
     ],
@@ -240,33 +310,27 @@ export const TOOL_GROUPS: Group[] = [
           { path: str("chemin relatif"), old_text: str("texte exact à remplacer (unique dans le fichier)"), new_text: str("nouveau texte") },
           ["path", "old_text", "new_text"],
         ),
+        async (a) => editOne(ctx.workspace, a.path, a.old_text, a.new_text),
+      ],
+      [
+        fn(
+          "edit_files",
+          "Faire plusieurs remplacements de passages exacts, dans un ou plusieurs fichiers, en un seul appel.",
+          {
+            edits: {
+              type: "array",
+              items: { type: "object", properties: { path: str("chemin relatif"), old_text: str("texte exact à remplacer"), new_text: str("nouveau texte") }, required: ["path", "old_text", "new_text"] },
+              description: "remplacements, appliqués dans l'ordre",
+            },
+          },
+          ["edits"],
+        ),
         async (a) => {
-          if (!a.path) return "Échec : chemin manquant (paramètre path).";
-          if (!a.old_text) return "Échec : old_text manquant. Pour réécrire tout le fichier, utilise write_file avec le contenu complet.";
-          const p = await inside(ctx.workspace, String(a.path));
-          const text = await fs.readFile(p, "utf8");
-          const oldText = String(a.old_text);
-          const newText = String(a.new_text ?? "");
-          const n = text.split(oldText).length - 1;
-          if (n === 1) {
-            const updated = text.replace(oldText, newText);
-            await fs.writeFile(p, updated, "utf8");
-            return `Fichier modifié : ${path.relative(ctx.workspace, p)}${await afterWrite(p, updated, text)}`;
-          }
-          // Small models rarely copy indentation exactly: retry on lines compared without surrounding spaces.
-          if (n === 0) {
-            const lines = text.split("\n");
-            const want = oldText.split("\n").map((l) => l.trim());
-            while (want.length && !want[want.length - 1]) want.pop();
-            const hits: number[] = [];
-            for (let i = 0; want.length && i + want.length <= lines.length; i++) if (want.every((w, k) => lines[i + k].trim() === w)) hits.push(i);
-            if (hits.length === 1) {
-              lines.splice(hits[0], want.length, ...newText.split("\n"));
-              await fs.writeFile(p, lines.join("\n"), "utf8");
-              return `Fichier modifié : ${path.relative(ctx.workspace, p)} (passage retrouvé malgré une indentation différente)${await afterWrite(p, lines.join("\n"), text)}`;
-            }
-          }
-          return `Échec : le passage apparaît ${n} fois (il doit être unique et copié à l'identique depuis read_file). Relis le fichier, ou réécris-le entièrement avec write_file.`;
+          const edits = Array.isArray(a.edits) ? (a.edits as Record<string, unknown>[]).slice(0, 20) : [];
+          if (!edits.length) return "Échec : aucune modification (paramètre edits).";
+          const out: string[] = [];
+          for (const e of edits) out.push(await editOne(ctx.workspace, e.path, e.old_text, e.new_text).catch((err) => `Échec (${String(e.path)}) : ${err instanceof Error ? err.message : String(err)}`));
+          return out.join("\n");
         },
       ],
     ],
@@ -285,6 +349,13 @@ export const TOOL_GROUPS: Group[] = [
           ["command"],
         ),
         async (a) => runCommand(String(a.command ?? ""), a.cwd ? await inside(ctx.workspace, String(a.cwd)) : ctx.workspace),
+      ],
+      [
+        fn("run_checks", "Lancer les tests du projet avec sa commande habituelle (détectée automatiquement : npm test, make test, pytest ou unittest).", {}),
+        async () => {
+          const cmd = await checkCommand(ctx.workspace);
+          return cmd ? runCommand(cmd, ctx.workspace) : "Aucune commande de test détectée : lance les tests avec run_command.";
+        },
       ],
     ],
   },

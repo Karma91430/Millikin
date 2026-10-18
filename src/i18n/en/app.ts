@@ -50,4 +50,7 @@ export const app: Record<string, string> = {
   "100 % local · Ollama": "100% local · Ollama",
   "Étapes max pour un ticket": "Max steps for a ticket",
   "Allers-retours outil → modèle pour une tentative de ticket : écrire, exécuter et corriger demande plus d'étapes qu'une réponse.": "Tool → model round trips for one ticket attempt: writing, running and fixing takes more steps than an answer.",
+  "Modèle de secours pour les relances": "Fallback model for relaunches",
+  "Une tâche rejetée ou en échec est relancée avec ce modèle (plus puissant) plutôt qu'avec le même. Vide = le modèle de l'agent.": "A rejected or failed task is relaunched with this (stronger) model instead of the same one. Empty = the agent's model.",
+  "Le modèle de l'agent": "The agent's model",
 };
