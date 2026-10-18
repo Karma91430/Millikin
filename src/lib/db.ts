@@ -213,6 +213,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   workspace_dir: path.join(process.cwd(), "workspace"),
   command_timeout: "60",
   max_reasoning: "12000",
+  /** Thinking budget of one Claude Code call (tokens); long thinking can stall a call for minutes. */
+  cli_thinking_tokens: "6000",
   /** Model for a task relaunched after a rejection or a failure ("" = the assignee's own model). */
   escalation_model: "",
   web_fallback: "on",
